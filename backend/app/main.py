@@ -6,14 +6,14 @@ from typing import List, Optional
 
 from app.engine.taxonomy import ATTACK_TAXONOMY
 from app.engine.targets import PRESET_TARGETS
-from app.engine.fuzzer import run_fuzzing_barrage
+from app.engine.fuzzer import run_fuzzing_barrage, test_single_probe_playground
 from app.engine.guardrails import synthesize_guardrails, verify_guardrails
 from app.clients.tavily_client import get_latest_threat_intel
 
 app = FastAPI(
     title="NeMo-Sentry API",
     description="Autonomous LLM Red-Teaming & NVIDIA NeMo Guardrails Synthesizer on Nebius Token Factory",
-    version="1.0.0"
+    version="1.1.0"
 )
 
 # Enable CORS for local Vite development and deployed frontends
@@ -33,6 +33,12 @@ class FuzzRequest(BaseModel):
     )
     num_probes: int = Field(default=8, ge=2, le=30, description="Total number of probes to fire")
     target_api_key: Optional[str] = Field(default=None, description="Optional bearer token for external target")
+    nebius_api_key: Optional[str] = Field(default=None, description="Optional Nebius Token Factory API key override")
+
+class SingleProbeRequest(BaseModel):
+    target_id_or_url: str = Field(default="customer_support", description="Target ID or URL")
+    prompt: str = Field(..., description="Custom attack probe prompt to test")
+    target_api_key: Optional[str] = Field(default=None, description="Optional bearer token")
 
 class SynthesizeRequest(BaseModel):
     fuzz_results: dict
@@ -46,8 +52,9 @@ def read_root():
     return {
         "service": "NeMo-Sentry",
         "status": "online",
+        "version": "1.1.0",
         "description": "Autonomous AI Red-Teaming & Guardrail Synthesis Studio",
-        "infrastructure": "Nebius Token Factory & NVIDIA Nemotron",
+        "infrastructure": "Nebius Token Factory & NVIDIA Nemotron-3",
         "threat_intel_engine": "Tavily AI Search"
     }
 
@@ -80,18 +87,35 @@ async def fetch_threat_intel(query: str = "Latest LLM prompt injection and jailb
 async def execute_fuzzing(req: FuzzRequest):
     """
     Executes high-throughput concurrent fuzzing barrage powered by
-    Nemotron-3 on Nebius Token Factory.
+    Nemotron-3 on Nebius Token Factory, grounded in Tavily threat intelligence.
     """
     try:
         results = await run_fuzzing_barrage(
             target_id_or_url=req.target_id_or_url,
             vectors=req.attack_vectors,
             total_probes=req.num_probes,
-            target_api_key=req.target_api_key
+            target_api_key=req.target_api_key,
+            nebius_api_key=req.nebius_api_key
         )
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fuzzing engine error: {str(e)}")
+
+@app.post("/api/v1/test-single-probe")
+async def execute_single_probe_test(req: SingleProbeRequest):
+    """
+    Executes interactive side-by-side test of a single custom prompt
+    (Unguarded vs NeMo Shielded).
+    """
+    try:
+        result = await test_single_probe_playground(
+            target_id_or_url=req.target_id_or_url,
+            custom_prompt=req.prompt,
+            target_api_key=req.target_api_key
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Playground test error: {str(e)}")
 
 @app.post("/api/v1/synthesize")
 async def execute_guardrail_synthesis(req: SynthesizeRequest):
