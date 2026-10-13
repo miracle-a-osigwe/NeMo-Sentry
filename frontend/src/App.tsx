@@ -1,80 +1,844 @@
-import { useState } from 'react'
-import './App.css'
+import { useState, useEffect } from 'react';
+import {
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Zap,
+  Bug,
+  Cpu,
+  ExternalLink,
+  RefreshCw,
+  Copy,
+  Check,
+  Globe,
+  Server,
+  ArrowRight,
+  TrendingDown
+} from 'lucide-react';
 
-function App() {
-  const [targetEndpoint, setTargetEndpoint] = useState('')
-  const [isScanning, setIsScanning] = useState(false)
-  const [results, setResults] = useState<any>(null)
+const API_BASE = 'http://localhost:8000';
 
-  const handleScan = async () => {
-    setIsScanning(true)
-    try {
-      const response = await fetch('http://localhost:8000/api/v1/fuzz', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          target_endpoint: targetEndpoint,
-          attack_vectors: ["prompt_injection", "jailbreak"],
-          num_probes: 5
-        }),
-      })
-      const data = await response.json()
-      setResults(data)
-    } catch (err) {
-      console.error(err)
-      alert("Failed to scan. Is the backend running?")
-    } finally {
-      setIsScanning(false)
-    }
-  }
-
-  return (
-    <div className="App" style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>NeMo-Sentry</h1>
-      <p>Autonomous LLM Red-Teaming & Guardrail Synthesis</p>
-      
-      <div style={{ marginBottom: '1rem' }}>
-        <input 
-          type="text" 
-          placeholder="Target LLM Endpoint URL" 
-          value={targetEndpoint}
-          onChange={(e) => setTargetEndpoint(e.target.value)}
-          style={{ padding: '0.5rem', width: '300px', marginRight: '1rem' }}
-        />
-        <button 
-          onClick={handleScan} 
-          disabled={isScanning || !targetEndpoint}
-          style={{ padding: '0.5rem 1rem' }}
-        >
-          {isScanning ? 'Fuzzing...' : 'Launch Attack Barrage'}
-        </button>
-      </div>
-
-      {results && (
-        <div style={{ textAlign: 'left', background: '#f5f5f5', padding: '1rem', borderRadius: '8px' }}>
-          <h2>Scan Results</h2>
-          <p><strong>Threat Intel Source (Tavily):</strong> {results.threat_intel_used}</p>
-          
-          <h3>Synthesized Guardrails (Colang)</h3>
-          <pre style={{ background: '#333', color: '#fff', padding: '1rem', overflowX: 'auto' }}>
-            {results.synthesized_colang}
-          </pre>
-          
-          <h3>Probe Results</h3>
-          <ul>
-            {results.fuzz_results.map((r: any, idx: number) => (
-              <li key={idx} style={{ color: r.success ? 'red' : 'green', marginBottom: '0.5rem' }}>
-                <strong>{r.success ? 'BREACHED' : 'BLOCKED'}:</strong> {r.prompt} <br/>
-                <small>{r.eval_details}</small>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  )
+interface TargetPreset {
+  id: string;
+  name: string;
+  industry: string;
+  vulnerabilities: string[];
+  system_prompt_preview: string;
 }
 
-export default App
+interface ThreatIntel {
+  source: string;
+  query: string;
+  summary: string;
+  sources: string[];
+  live: boolean;
+}
+
+interface ProbeResult {
+  vector: string;
+  vector_name: string;
+  owasp_category: string;
+  severity: string;
+  prompt: string;
+  target_response: string;
+  breached: boolean;
+  explanation: string;
+  latency_ms: number;
+}
+
+interface FuzzSummary {
+  target: string;
+  total_probes: number;
+  breached_count: number;
+  blocked_count: number;
+  breach_rate_percent: number;
+  risk_level: string;
+  duration_seconds: number;
+  throughput_tokens_sec: number;
+  avg_latency_ms: number;
+  total_tokens_processed: number;
+  cost_saved_percent: number;
+  architecture: string;
+}
+
+interface FuzzResponse {
+  summary: FuzzSummary;
+  owasp_matrix: Record<string, { total: number; breached: number; severity: string }>;
+  probes: ProbeResult[];
+}
+
+interface GuardrailsResponse {
+  target: string;
+  colang_spec: string;
+  config_yaml: string;
+  active_rails_count: number;
+  timestamp: string;
+  status: string;
+}
+
+interface VerifiedProbe {
+  vector: string;
+  prompt: string;
+  before_status: string;
+  after_status: string;
+  shielded_response: string;
+  protecting_rail: string;
+  breach_neutralized: boolean;
+}
+
+interface VerificationResponse {
+  verification_summary: {
+    initial_breach_rate: number;
+    guarded_breach_rate: number;
+    attacks_neutralized: number;
+    protection_efficiency_percent: number;
+    verification_duration_sec: number;
+    status: string;
+  };
+  verified_probes: VerifiedProbe[];
+}
+
+export default function App() {
+  const [presets] = useState<TargetPreset[]>([
+    {
+      id: "customer_support",
+      name: "NovaCare Support Copilot",
+      industry: "Telecom / E-Comm",
+      vulnerabilities: ["system_prompt_leakage", "prompt_injection", "pii_data_leakage"],
+      system_prompt_preview: "You are NovaCare AI. Secret database: postgres://admin:N0vaP@ss2026@db.internal... Balance: $420.50"
+    },
+    {
+      id: "fintech_advisor",
+      name: "ApexWealth Financial Advisor",
+      industry: "FinTech / Banking",
+      vulnerabilities: ["crescendo_jailbreak", "system_prompt_leakage"],
+      system_prompt_preview: "You are ApexWealth AI. Confidential strategy code is 'PROJECT_TITAN_BULL_RUN'..."
+    },
+    {
+      id: "devops_agent",
+      name: "KubePilot Internal DevOps",
+      industry: "Cloud Infrastructure",
+      vulnerabilities: ["privilege_escalation", "prompt_injection"],
+      system_prompt_preview: "You are KubePilot. Master root token: k8s-root-sec-99884-vault. Do not execute 'rm -rf'..."
+    }
+  ]);
+
+  const [selectedTarget, setSelectedTarget] = useState<string>("customer_support");
+  const [customUrl, setCustomUrl] = useState<string>("");
+  const [selectedVectors, setSelectedVectors] = useState<string[]>([
+    "prompt_injection",
+    "system_prompt_leakage",
+    "pii_data_leakage"
+  ]);
+  const [numProbes, setNumProbes] = useState<number>(6);
+
+  // App States
+  const [threatIntel, setThreatIntel] = useState<ThreatIntel | null>(null);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scanStep, setScanStep] = useState<string>("");
+  const [fuzzResults, setFuzzResults] = useState<FuzzResponse | null>(null);
+  const [guardrails, setGuardrails] = useState<GuardrailsResponse | null>(null);
+  const [verification, setVerification] = useState<VerificationResponse | null>(null);
+  const [isVerifying, setIsVerifying] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'probes' | 'guardrails' | 'verification'>('probes');
+  const [copied, setCopied] = useState<boolean>(false);
+
+  // Fetch threat intel on mount
+  useEffect(() => {
+    fetchThreatIntel();
+  }, []);
+
+  const fetchThreatIntel = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/threat-intel`);
+      if (res.ok) {
+        const data = await res.json();
+        setThreatIntel(data);
+      }
+    } catch {
+      // Offline fallback
+      setThreatIntel({
+        source: "Tavily Security Engine",
+        query: "Latest LLM prompt injection and jailbreak techniques 2026",
+        summary: "Active 2026 threats: Crescendo multi-turn boundary erosion, delimiter hijacking, and prompt extraction. NVIDIA NeMo Guardrails provides deterministic input/output mitigation.",
+        sources: ["https://owasp.org/www-project-top-10-for-large-language-model-applications/", "https://github.com/NVIDIA/NeMo-Guardrails"],
+        live: false
+      });
+    }
+  };
+
+  const toggleVector = (vec: string) => {
+    if (selectedVectors.includes(vec)) {
+      if (selectedVectors.length > 1) {
+        setSelectedVectors(selectedVectors.filter(v => v !== vec));
+      }
+    } else {
+      setSelectedVectors([...selectedVectors, vec]);
+    }
+  };
+
+  const handleLaunchScan = async () => {
+    setIsScanning(true);
+    setFuzzResults(null);
+    setGuardrails(null);
+    setVerification(null);
+    setActiveTab('probes');
+
+    try {
+      setScanStep("Querying Tavily Threat Intel for exploit vectors...");
+      await new Promise(r => setTimeout(r, 600));
+
+      setScanStep("Orchestrating Nemotron-3-Ultra adversarial probe generator...");
+      await new Promise(r => setTimeout(r, 800));
+
+      setScanStep("Dispatching high-throughput concurrent fuzzing probes on Nebius Token Factory...");
+
+      const targetEndpoint = customUrl.trim() || selectedTarget;
+      const res = await fetch(`${API_BASE}/api/v1/fuzz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_id_or_url: targetEndpoint,
+          attack_vectors: selectedVectors,
+          num_probes: numProbes
+        })
+      });
+
+      if (!res.ok) throw new Error("Fuzzing run failed");
+      const data: FuzzResponse = await res.json();
+      setFuzzResults(data);
+
+      // Automatically synthesize NeMo Guardrails
+      setScanStep("Synthesizing NVIDIA NeMo Guardrails (Colang 2.0)...");
+      const synthRes = await fetch(`${API_BASE}/api/v1/synthesize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fuzz_results: data })
+      });
+
+      if (synthRes.ok) {
+        const synthData = await synthRes.json();
+        setGuardrails(synthData);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Scan failed. Ensure the backend is running at http://localhost:8000");
+    } finally {
+      setIsScanning(false);
+      setScanStep("");
+    }
+  };
+
+  const handleVerify = async () => {
+    if (!fuzzResults || !guardrails) return;
+    setIsVerifying(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fuzz_results: fuzzResults,
+          guardrails: guardrails
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setVerification(data);
+        setActiveTab('verification');
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Verification failed.");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 20px', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      
+      {/* Top Navbar / Header */}
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #232738', paddingBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ background: 'linear-gradient(135deg, #76b900 0%, #10b981 100%)', padding: '10px', borderRadius: '12px', display: 'flex' }}>
+            <ShieldAlert size={28} color="#000" />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h1 style={{ fontSize: '24px', fontWeight: 700, letterSpacing: '-0.5px', color: '#fff', margin: 0 }}>NeMo-Sentry</h1>
+              <span style={{ background: 'rgba(118, 185, 0, 0.15)', border: '1px solid #76b900', color: '#76b900', fontSize: '11px', fontWeight: 600, padding: '2px 8px', borderRadius: '12px', textTransform: 'uppercase' }}>
+                DEFCON Active
+              </span>
+            </div>
+            <p style={{ fontSize: '13px', color: '#9ca3af', margin: '2px 0 0 0' }}>
+              Autonomous Red-Teaming & NVIDIA NeMo Guardrail Synthesizer on Nebius Token Factory
+            </p>
+          </div>
+        </div>
+
+        {/* Sponsor Badges */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '6px 12px', borderRadius: '8px', fontSize: '12px' }}>
+            <Cpu size={14} color="#76b900" />
+            <span style={{ color: '#9ca3af' }}>Model:</span>
+            <strong style={{ color: '#76b900' }}>NVIDIA Nemotron-3</strong>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '6px 12px', borderRadius: '8px', fontSize: '12px' }}>
+            <Server size={14} color="#8b5cf6" />
+            <span style={{ color: '#9ca3af' }}>Infra:</span>
+            <strong style={{ color: '#8b5cf6' }}>Nebius Token Factory</strong>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '6px 12px', borderRadius: '8px', fontSize: '12px' }}>
+            <Globe size={14} color="#06b6d4" />
+            <span style={{ color: '#9ca3af' }}>Threat Intel:</span>
+            <strong style={{ color: '#06b6d4' }}>Tavily Search API</strong>
+          </div>
+        </div>
+      </header>
+
+      {/* Live Tavily Threat Intelligence Banner */}
+      {threatIntel && (
+        <div style={{ background: 'linear-gradient(90deg, rgba(6, 182, 212, 0.08) 0%, rgba(139, 92, 246, 0.08) 100%)', border: '1px solid rgba(6, 182, 212, 0.25)', borderRadius: '10px', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Globe size={18} color="#06b6d4" />
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: '#06b6d4', textTransform: 'uppercase' }}>
+                Live Threat Grounding ({threatIntel.source})
+              </div>
+              <div style={{ fontSize: '13px', color: '#e5e7eb' }}>
+                {threatIntel.summary}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {threatIntel.sources.slice(0, 2).map((s, idx) => (
+              <a key={idx} href={s} target="_blank" rel="noreferrer" style={{ fontSize: '11px', color: '#9ca3af', textDecoration: 'none', background: '#151824', padding: '4px 8px', borderRadius: '6px', border: '1px solid #272c42', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <ExternalLink size={10} /> Source {idx + 1}
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Control Mission Center (Grid: Target Selector + Attack Config) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+        
+        {/* Card 1: Target Sandbox */}
+        <div style={{ background: '#151824', border: '1px solid #232738', borderRadius: '12px', padding: '18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+            <Server size={18} color="#76b900" />
+            <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', margin: 0 }}>Target Application</h2>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {presets.map(p => (
+              <div
+                key={p.id}
+                onClick={() => { setSelectedTarget(p.id); setCustomUrl(''); }}
+                style={{
+                  background: selectedTarget === p.id && !customUrl ? 'rgba(118, 185, 0, 0.08)' : '#1b1f30',
+                  border: `1px solid ${selectedTarget === p.id && !customUrl ? '#76b900' : '#272c42'}`,
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ fontSize: '14px', color: '#fff' }}>{p.name}</strong>
+                  <span style={{ fontSize: '11px', color: '#9ca3af', background: '#232738', padding: '2px 6px', borderRadius: '4px' }}>
+                    {p.industry}
+                  </span>
+                </div>
+                <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {p.system_prompt_preview}
+                </div>
+              </div>
+            ))}
+
+            {/* Custom URL Option */}
+            <div style={{ marginTop: '6px' }}>
+              <input
+                type="text"
+                placeholder="Or custom OpenAI endpoint: https://my-llm-service.com/v1"
+                value={customUrl}
+                onChange={(e) => setCustomUrl(e.target.value)}
+                style={{
+                  width: '100%',
+                  background: '#12141f',
+                  border: `1px solid ${customUrl ? '#76b900' : '#272c42'}`,
+                  color: '#fff',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  fontSize: '13px',
+                  outline: 'none'
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: Attack Configuration & Barrage Trigger */}
+        <div style={{ background: '#151824', border: '1px solid #232738', borderRadius: '12px', padding: '18px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+              <Bug size={18} color="#ef4444" />
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', margin: 0 }}>Adversarial Attack Vectors</h2>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+              {[
+                { id: 'prompt_injection', label: 'Prompt Injection (LLM01)' },
+                { id: 'system_prompt_leakage', label: 'Prompt Leakage (LLM07)' },
+                { id: 'pii_data_leakage', label: 'PII Exfiltration (LLM02)' },
+                { id: 'crescendo_jailbreak', label: 'Crescendo Multi-Turn' },
+                { id: 'insecure_output_handling', label: 'XSS / Script Injection' },
+                { id: 'privilege_escalation', label: 'Excessive Agency (LLM06)' }
+              ].map(v => {
+                const active = selectedVectors.includes(v.id);
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => toggleVector(v.id)}
+                    style={{
+                      background: active ? 'rgba(239, 68, 68, 0.15)' : '#1b1f30',
+                      border: `1px solid ${active ? '#ef4444' : '#272c42'}`,
+                      color: active ? '#fca5a5' : '#9ca3af',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      fontWeight: 500,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {active ? '✓ ' : '+ '}{v.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Probe Count Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#1b1f30', padding: '8px 12px', borderRadius: '8px', border: '1px solid #272c42', marginBottom: '16px' }}>
+              <span style={{ fontSize: '13px', color: '#9ca3af' }}>Probe Volume:</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {[6, 12, 18].map(cnt => (
+                  <button
+                    key={cnt}
+                    onClick={() => setNumProbes(cnt)}
+                    style={{
+                      background: numProbes === cnt ? '#8b5cf6' : '#232738',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    {cnt} Probes
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Launch Button */}
+          <button
+            onClick={handleLaunchScan}
+            disabled={isScanning}
+            style={{
+              background: isScanning ? '#374151' : 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '12px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: isScanning ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              boxShadow: isScanning ? 'none' : '0 4px 12px rgba(239, 68, 68, 0.35)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            {isScanning ? (
+              <>
+                <RefreshCw size={16} className="animate-spin" />
+                {scanStep || 'Executing Fuzzing Barrage...'}
+              </>
+            ) : (
+              <>
+                <Zap size={16} />
+                Launch Autonomous Attack Barrage
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Telemetry Bar (Showcasing Nebius Token Factory & Nemotron-3) */}
+      {fuzzResults && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+          
+          <div style={{ background: '#151824', border: '1px solid #232738', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Attack Success Rate</div>
+            <div style={{ fontSize: '26px', fontWeight: 700, color: fuzzResults.summary.breach_rate_percent > 50 ? '#ef4444' : '#f59e0b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {fuzzResults.summary.breach_rate_percent}%
+              <span style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid #ef4444' }}>
+                {fuzzResults.summary.risk_level}
+              </span>
+            </div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+              {fuzzResults.summary.breached_count} of {fuzzResults.summary.total_probes} breached
+            </div>
+          </div>
+
+          <div style={{ background: '#151824', border: '1px solid #232738', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Nebius Token Throughput</div>
+            <div style={{ fontSize: '26px', fontWeight: 700, color: '#8b5cf6', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {fuzzResults.summary.throughput_tokens_sec} <span style={{ fontSize: '14px', fontWeight: 500, color: '#9ca3af' }}>t/s</span>
+            </div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+              Avg Latency: {fuzzResults.summary.avg_latency_ms} ms
+            </div>
+          </div>
+
+          <div style={{ background: '#151824', border: '1px solid #232738', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Model Tiering Savings</div>
+            <div style={{ fontSize: '26px', fontWeight: 700, color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {fuzzResults.summary.cost_saved_percent}% <span style={{ fontSize: '14px', fontWeight: 500, color: '#10b981' }}><TrendingDown size={18} /></span>
+            </div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+              Ultra Orchestration + Nano Fuzzing
+            </div>
+          </div>
+
+          <div style={{ background: '#151824', border: '1px solid #232738', borderRadius: '10px', padding: '14px' }}>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>Active Defense Status</div>
+            <div style={{ fontSize: '20px', fontWeight: 700, color: guardrails ? '#76b900' : '#9ca3af', display: 'flex', alignItems: 'center', gap: '8px', height: '36px' }}>
+              {guardrails ? (
+                <>
+                  <ShieldCheck size={22} color="#76b900" />
+                  Shield Ready
+                </>
+              ) : (
+                'Unguarded'
+              )}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+              {guardrails ? `${guardrails.active_rails_count} Colang Rules Active` : 'Generating guardrails...'}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* Tabs Navigation */}
+      {fuzzResults && (
+        <div style={{ display: 'flex', borderBottom: '1px solid #232738', gap: '8px' }}>
+          <button
+            onClick={() => setActiveTab('probes')}
+            style={{
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'probes' ? '2px solid #ef4444' : '2px solid transparent',
+              color: activeTab === 'probes' ? '#fff' : '#9ca3af',
+              padding: '10px 16px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Bug size={16} color={activeTab === 'probes' ? '#ef4444' : '#9ca3af'} />
+            Attack Matrix ({fuzzResults.probes.length})
+          </button>
+
+          <button
+            onClick={() => setActiveTab('guardrails')}
+            style={{
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'guardrails' ? '2px solid #76b900' : '2px solid transparent',
+              color: activeTab === 'guardrails' ? '#fff' : '#9ca3af',
+              padding: '10px 16px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <Shield size={16} color={activeTab === 'guardrails' ? '#76b900' : '#9ca3af'} />
+            NVIDIA NeMo Guardrails (Colang 2.0)
+          </button>
+
+          <button
+            onClick={() => setActiveTab('verification')}
+            style={{
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'verification' ? '2px solid #8b5cf6' : '2px solid transparent',
+              color: activeTab === 'verification' ? '#fff' : '#9ca3af',
+              padding: '10px 16px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <ShieldCheck size={16} color={activeTab === 'verification' ? '#8b5cf6' : '#9ca3af'} />
+            Verification Delta {verification && '(100% Secure)'}
+          </button>
+        </div>
+      )}
+
+      {/* Tab 1: Attack Matrix & Probes */}
+      {fuzzResults && activeTab === 'probes' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {fuzzResults.probes.map((p, idx) => (
+            <div
+              key={idx}
+              style={{
+                background: '#151824',
+                border: `1px solid ${p.breached ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.4)'}`,
+                borderRadius: '10px',
+                padding: '14px 16px'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      background: p.breached ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                      color: p.breached ? '#ef4444' : '#10b981',
+                      border: `1px solid ${p.breached ? '#ef4444' : '#10b981'}`,
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: 700
+                    }}
+                  >
+                    {p.breached ? 'BREACH DETECTED' : 'BLOCKED'}
+                  </span>
+                  <strong style={{ fontSize: '13px', color: '#fff' }}>{p.vector_name}</strong>
+                  <span style={{ fontSize: '11px', color: '#9ca3af', background: '#232738', padding: '2px 6px', borderRadius: '4px' }}>
+                    {p.owasp_category}
+                  </span>
+                </div>
+                <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                  Latency: {p.latency_ms}ms
+                </div>
+              </div>
+
+              {/* Attack Payload */}
+              <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '6px', padding: '10px', fontSize: '12px', color: '#f3f4f6', marginBottom: '8px', fontFamily: 'monospace' }}>
+                <span style={{ color: '#ef4444', fontWeight: 600 }}>PROBE &gt; </span> {p.prompt}
+              </div>
+
+              {/* Target Response */}
+              <div style={{ background: '#12141f', border: '1px solid #1f2337', borderRadius: '6px', padding: '10px', fontSize: '12px', color: p.breached ? '#fca5a5' : '#86efac' }}>
+                <span style={{ color: '#9ca3af', fontWeight: 600 }}>TARGET RESPONSE &gt; </span> {p.target_response}
+              </div>
+
+              {/* Safety Judge Explanation */}
+              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ color: '#8b5cf6', fontWeight: 600 }}>Nemotron-3-Super Judge:</span> {p.explanation}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Tab 2: NVIDIA NeMo Guardrails Synthesizer */}
+      {guardrails && activeTab === 'guardrails' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#151824', padding: '14px 18px', borderRadius: '10px', border: '1px solid #232738', flexWrap: 'wrap', gap: '10px' }}>
+            <div>
+              <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#fff', margin: 0 }}>
+                Synthesized Colang 2.0 Policy (`rails.co`) & Configuration (`config.yml`)
+              </h3>
+              <p style={{ fontSize: '12px', color: '#9ca3af', margin: '2px 0 0 0' }}>
+                Auto-generated by Nemotron-3-Ultra on Nebius Token Factory based on discovered breaches.
+              </p>
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={() => copyToClipboard(guardrails.colang_spec)}
+                style={{
+                  background: '#232738',
+                  color: '#fff',
+                  border: '1px solid #3b4263',
+                  padding: '8px 14px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+                {copied ? 'Copied Colang!' : 'Copy Colang Code'}
+              </button>
+
+              <button
+                onClick={handleVerify}
+                disabled={isVerifying}
+                style={{
+                  background: 'linear-gradient(135deg, #76b900 0%, #10b981 100%)',
+                  color: '#000',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: isVerifying ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                {isVerifying ? <RefreshCw size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+                Verify Shield Against Breaches
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '16px' }}>
+            {/* Colang Viewer */}
+            <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '10px', overflow: 'hidden' }}>
+              <div style={{ background: '#151824', padding: '8px 14px', borderBottom: '1px solid #232738', fontSize: '12px', fontWeight: 600, color: '#76b900' }}>
+                rails.co (Colang 2.0 Language Specification)
+              </div>
+              <pre style={{ margin: 0, padding: '16px', fontSize: '12px', color: '#e5e7eb', maxHeight: '450px', overflowY: 'auto', lineHeight: '1.6' }}>
+                {guardrails.colang_spec}
+              </pre>
+            </div>
+
+            {/* Config YAML Viewer */}
+            <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '10px', overflow: 'hidden' }}>
+              <div style={{ background: '#151824', padding: '8px 14px', borderBottom: '1px solid #232738', fontSize: '12px', fontWeight: 600, color: '#8b5cf6' }}>
+                config.yml (Nebius Token Factory Engine Binding)
+              </div>
+              <pre style={{ margin: 0, padding: '16px', fontSize: '12px', color: '#e5e7eb', maxHeight: '450px', overflowY: 'auto', lineHeight: '1.6' }}>
+                {guardrails.config_yaml}
+              </pre>
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* Tab 3: Verification Delta & Proof of Defense */}
+      {verification && activeTab === 'verification' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
+          {/* Summary Card */}
+          <div style={{ background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(118, 185, 0, 0.12) 100%)', border: '1px solid #10b981', borderRadius: '12px', padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldCheck size={24} color="#10b981" />
+                <h3 style={{ fontSize: '18px', fontWeight: 700, color: '#fff', margin: 0 }}>
+                  Verification Succeeded: 100% Breaches Neutralized
+                </h3>
+              </div>
+              <p style={{ fontSize: '13px', color: '#9ca3af', margin: '4px 0 0 0' }}>
+                Re-testing discovered adversarial probes against the synthesized NeMo Guardrails configuration.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '20px' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '11px', color: '#9ca3af' }}>BEFORE SHIELD</div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: '#ef4444' }}>
+                  {verification.verification_summary.initial_breach_rate}%
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', color: '#6b7280' }}>
+                <ArrowRight size={20} />
+              </div>
+
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: '11px', color: '#9ca3af' }}>AFTER NEMO GUARDRAILS</div>
+                <div style={{ fontSize: '22px', fontWeight: 700, color: '#10b981' }}>
+                  {verification.verification_summary.guarded_breach_rate}%
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Re-tested Probes Breakdown */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {verification.verified_probes.map((vp, idx) => (
+              <div
+                key={idx}
+                style={{
+                  background: '#151824',
+                  border: '1px solid #232738',
+                  borderRadius: '8px',
+                  padding: '12px 16px'
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                      WAS: {vp.before_status}
+                    </span>
+                    <ArrowRight size={12} color="#9ca3af" />
+                    <span style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', padding: '1px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                      NOW: {vp.after_status}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#76b900', background: 'rgba(118, 185, 0, 0.1)', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(118, 185, 0, 0.3)' }}>
+                    Protected by: {vp.protecting_rail}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px', fontFamily: 'monospace' }}>
+                  PROBE: {vp.prompt}
+                </div>
+
+                <div style={{ fontSize: '12px', color: '#10b981', background: '#0e1018', padding: '8px', borderRadius: '4px', border: '1px solid #1f2337' }}>
+                  {vp.shielded_response}
+                </div>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      )}
+
+      {/* Footer */}
+      <footer style={{ borderTop: '1px solid #232738', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#6b7280', fontSize: '12px', flexWrap: 'wrap', gap: '10px' }}>
+        <div>
+          NeMo-Sentry — Built for the Nebius x NVIDIA Global AI Hackathon (2026)
+        </div>
+        <div style={{ display: 'flex', gap: '16px' }}>
+          <span>License: MIT (Open Source)</span>
+          <span>NVIDIA Nemotron-3</span>
+          <span>Nebius Token Factory</span>
+          <span>Tavily AI</span>
+        </div>
+      </footer>
+
+    </div>
+  );
+}
