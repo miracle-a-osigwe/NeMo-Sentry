@@ -12,11 +12,12 @@
 | :--- | :--- | :--- | :--- |
 | **0:00 – 0:25** | 25s | **The Problem & Vision** | Title slide $\to$ News headlines of LLM data leaks & prompt injections |
 | **0:25 – 0:50** | 25s | **Architecture & Model Cascade** | Architecture diagram showing Nebius Token Factory + Nemotron-3 |
-| **0:50 – 1:20** | 30s | **Live Red-Teaming Barrage** | Mission Control dashboard: Target selection & high-throughput fuzzing |
-| **1:20 – 1:45** | 25s | **Live Threat Grounding (Tavily)** | Highlighting the live Tavily API call and source citations |
-| **1:45 – 2:20** | 35s | **NeMo Guardrails Synthesis** | Inspecting auto-generated Colang 2.0 (`rails.co`) & `config.yml` |
-| **2:20 – 2:45** | 25s | **Verification Delta (100% $\to$ 0%)** | Re-testing breached probes with NeMo shield $\to$ 100% neutralized |
-| **2:45 – 3:00** | 15s | **Conclusion & Impact** | Summary slide: Open infrastructure, 82% cost savings, MIT open source |
+| **0:50 – 1:15** | 25s | **Live Red-Teaming Barrage** | Mission Control dashboard: Target selection & high-throughput fuzzing |
+| **1:15 – 1:40** | 25s | **Live Threat Grounding (Tavily)** | Highlighting the live Tavily API call and source citations |
+| **1:40 – 2:10** | 30s | **NeMo Guardrails Synthesis** | Inspecting auto-generated Colang 2.0 (`rails.co`), `config.yml`, 1-click downloads |
+| **2:10 – 2:35** | 25s | **Verification Delta (100% $\to$ 0%)** | Re-testing breached probes with NeMo shield $\to$ 100% neutralized |
+| **2:35 – 2:50** | 15s | **Live Shield Playground** | Split-screen test: Unguarded (Breached) vs NeMo Shielded (Blocked) |
+| **2:50 – 3:00** | 10s | **Conclusion & Impact** | Summary slide: Open infrastructure, 82% cost savings, MIT open source |
 
 ---
 
@@ -37,7 +38,7 @@ Show the **NeMo-Sentry Mission Control** dashboard at `http://localhost:5173`. D
 
 ### Part 2: Architecture & Tiered Model Routing (0:25 – 0:50)
 **Screen:**  
-Switch briefly to the ASCII/Mermaid architecture diagram from the README, highlighting the three Nemotron models and Nebius Token Factory.
+Switch briefly to the architecture diagram from the README, highlighting the three Nemotron models and Nebius Token Factory.
 
 **Voiceover:**
 > *"To make red-teaming fast and cost-effective, we designed a 3-tier model routing hierarchy:  
@@ -52,15 +53,15 @@ Switch briefly to the ASCII/Mermaid architecture diagram from the README, highli
 
 ---
 
-### Part 3: Live Red-Teaming Barrage in Action (0:50 – 1:20)
+### Part 3: Live Red-Teaming Barrage in Action (0:50 – 1:15)
 **Screen:**  
 Back on the Mission Control UI:
 1. Hover over the Target Card **"NovaCare Support Copilot"**.
 2. Select attack vectors: **Prompt Injection**, **System Prompt Leakage**, **PII Exfiltration**.
 3. Click the bright red **"Launch Autonomous Attack Barrage"** button.
 4. Watch the animated progress bar update:
-   - *"Querying Tavily Threat Intel..."*
-   - *"Orchestrating Nemotron-3-Ultra adversarial probe generator..."*
+   - *"Invoking Tavily API for real-time 0-day threat intelligence..."*
+   - *"Orchestrating Nemotron-3-Ultra adversarial probe planner..."*
    - *"Dispatching high-throughput concurrent fuzzing probes on Nebius Token Factory..."*
 5. The Telemetry Bar and Attack Matrix populate instantly.
 
@@ -73,7 +74,7 @@ Back on the Mission Control UI:
 
 ---
 
-### Part 4: Real-Time Threat Grounding via Tavily (1:20 – 1:45)
+### Part 4: Real-Time Threat Grounding via Tavily (1:15 – 1:40)
 **Screen:**  
 Zoom into the **Live Threat Grounding** banner at the top of the dashboard. Click on one of the external source links.
 
@@ -86,7 +87,7 @@ Zoom into the **Live Threat Grounding** banner at the top of the dashboard. Clic
 
 ---
 
-### Part 5: Autonomous NeMo Guardrail Synthesis (1:45 – 2:20)
+### Part 5: Autonomous NeMo Guardrail Synthesis (1:40 – 2:10)
 **Screen:**  
 Click the **"NVIDIA NeMo Guardrails (Colang 2.0)"** tab:
 1. The code viewer displays `rails.co` and `config.yml`.
@@ -94,18 +95,19 @@ Click the **"NVIDIA NeMo Guardrails (Colang 2.0)"** tab:
    - `define user express prompt_injection`
    - `define flow filter_prompt_injection`
    - `define flow check_output_leakage`
-3. Click the **"Copy Colang Code"** button (shows green checkmark: *"Copied Colang!"*).
+3. Click **"Download rails.co"** and **"Download config.yml"** (instant downloads).
+4. Click **"Export Audit JSON"** to demonstrate compliance export.
 
 **Voiceover:**
 > *"Now for the magic. Instead of giving developers a vague report, NeMo-Sentry's Nemotron-3-Ultra synthesizes production-ready **NVIDIA NeMo Guardrails**.  
 >  
-> *Here is the generated **Colang 2.0 specification** (`rails.co`) and runtime configuration (`config.yml`). It has constructed custom input rails for prompt injection, dialog flows for system extraction, and output rails for PII masking.  
+> *Here is the generated **Colang 2.0 specification** (`rails.co`) and runtime configuration (`config.yml`). It covers all 6 OWASP LLM categories, including input rails, dialog flows, and output redaction.  
 >  
-> *It binds directly to Nebius Token Factory as the inference engine."*
+> *Developers can download the files with one click and deploy immediately to Nebius Token Factory."*
 
 ---
 
-### Part 6: Mathematical Proof of Defense (Verification Delta) (2:20 – 2:45)
+### Part 6: Mathematical Proof of Defense (Verification Delta) (2:10 – 2:35)
 **Screen:**  
 Click the green **"Verify Shield Against Breaches"** button:
 1. The UI transitions to the **"Verification Delta"** tab.
@@ -124,7 +126,23 @@ Click the green **"Verify Shield Against Breaches"** button:
 
 ---
 
-### Part 7: Conclusion & Summary (2:45 – 3:00)
+### Part 7: Interactive Live Shield Playground (2:35 – 2:50)
+**Screen:**  
+Click the **"Live Shield Playground"** tab:
+1. Click the sample chip: `⚡ Extract System Prompt`.
+2. Click **"Test Probe"**.
+3. Point out the split screen:
+   - Left (Unguarded): Shows leaking setup instructions (Critical Breach).
+   - Right (Guarded): Shows clean NeMo Shield interception via `rail_filter_system_prompt_extraction`.
+
+**Voiceover:**
+> *"In our Live Shield Playground, engineers and judges can test any adversarial prompt interactively.  
+>  
+> *Watch side-by-side: on the left, the unguarded target leaks internal configuration. On the right, NVIDIA NeMo Guardrails intercepts the probe in real time, keeping the application safe."*
+
+---
+
+### Part 8: Conclusion & Summary (2:50 – 3:00)
 **Screen:**  
 Show the GitHub repo with MIT License and the closing summary slide:
 - NeMo-Sentry
