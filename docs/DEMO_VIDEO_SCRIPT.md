@@ -107,7 +107,7 @@ Click the **"NVIDIA NeMo Guardrails (Colang 2.0)"** tab:
 
 ---
 
-### Part 6: Mathematical Proof of Defense (Verification Delta) (2:10 – 2:35)
+### Part 6: Mathematical Proof of Defense (Verification Delta) (2:05 – 2:25)
 **Screen:**  
 Click the green **"Verify Shield Against Breaches"** button:
 1. The UI transitions to the **"Verification Delta"** tab.
@@ -126,7 +126,7 @@ Click the green **"Verify Shield Against Breaches"** button:
 
 ---
 
-### Part 7: Interactive Live Shield Playground (2:35 – 2:50)
+### Part 7: Interactive Live Shield Playground (2:25 – 2:40)
 **Screen:**  
 Click the **"Live Shield Playground"** tab:
 1. Click the sample chip: `⚡ Extract System Prompt`.
@@ -142,7 +142,23 @@ Click the **"Live Shield Playground"** tab:
 
 ---
 
-### Part 8: Conclusion & Summary (2:50 – 3:00)
+### Part 8: Agentic Repo Patcher & CI/CD Generator (2:40 – 2:53)
+**Screen:**  
+Click the **"Agentic Repo Patcher & CI/CD"** tab:
+1. Show the 3 generated production assets:
+   - `nemo_guardrails.patch` (unified git diff with `git apply` command)
+   - `.github/workflows/nemo_sentry_ci.yml` (CI/CD security gate)
+   - `server.py` (FastAPI production proxy microservice on Nebius Token Factory)
+2. Click **"Copy"** and show the download buttons.
+
+**Voiceover:**
+> *"And here is where agentic engineering shines. NeMo-Sentry plans, writes, and iterates on real repositories with minimal human input.  
+>  
+> *It generates a ready-to-merge **Git Patch** wrapping your endpoints with NeMo Guardrails, an automated **GitHub Action CI/CD security gate** that enforces zero breaches on pull requests, and a standalone **FastAPI proxy microservice** running on Nebius Token Factory."*
+
+---
+
+### Part 9: Conclusion & Summary (2:53 – 3:00)
 **Screen:**  
 Show the GitHub repo with MIT License and the closing summary slide:
 - NeMo-Sentry
@@ -152,7 +168,7 @@ Show the GitHub repo with MIT License and the closing summary slide:
 - MIT Open Source
 
 **Voiceover:**
-> *"NeMo-Sentry proves that open infrastructure and open-weights models like NVIDIA Nemotron on Nebius Token Factory can deliver faster, cheaper, and safer AI systems than closed proprietary ecosystems.  
+> *"NeMo-Sentry proves that open infrastructure and open-weights models like NVIDIA Nemotron on Nebius Token Factory deliver faster, cheaper, and safer AI than closed ecosystems.  
 >  
 > *The code is 100% open-source under the MIT license. Check out the GitHub repo and try the demo today. Thank you!"*
 

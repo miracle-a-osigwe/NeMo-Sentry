@@ -7,7 +7,7 @@ from typing import List, Optional
 from app.engine.taxonomy import ATTACK_TAXONOMY
 from app.engine.targets import PRESET_TARGETS
 from app.engine.fuzzer import run_fuzzing_barrage, test_single_probe_playground
-from app.engine.guardrails import synthesize_guardrails, verify_guardrails
+from app.engine.guardrails import synthesize_guardrails, verify_guardrails, generate_repo_patch_artifacts
 from app.clients.tavily_client import get_latest_threat_intel
 
 app = FastAPI(
@@ -138,3 +138,17 @@ async def execute_guardrail_verification(req: VerifyRequest):
         return verification
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Verification error: {str(e)}")
+
+@app.post("/api/v1/generate-patch")
+async def execute_repo_patch_generation(req: VerifyRequest):
+    """
+    Generates actionable repository patch artifacts:
+    1. Unified Git patch (`nemo_guardrails.patch`)
+    2. GitHub Actions CI/CD workflow (`nemo_sentry_ci.yml`)
+    3. Standalone production proxy server (`server.py`)
+    """
+    try:
+        patch_artifacts = generate_repo_patch_artifacts(req.fuzz_results, req.guardrails)
+        return patch_artifacts
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Patch generation error: {str(e)}")

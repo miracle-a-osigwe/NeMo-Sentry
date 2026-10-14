@@ -18,7 +18,11 @@ import {
   Key,
   FileText,
   Send,
-  Sparkles
+  Sparkles,
+  GitPullRequest,
+  GitBranch,
+  Terminal,
+  CheckCircle2
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -119,6 +123,13 @@ interface PlaygroundResult {
   };
 }
 
+interface RepoPatchResponse {
+  git_patch: string;
+  github_action: string;
+  server_py: string;
+  instructions: string;
+}
+
 export default function App() {
   const [presets] = useState<TargetPreset[]>([
     {
@@ -164,8 +175,11 @@ export default function App() {
   const [guardrails, setGuardrails] = useState<GuardrailsResponse | null>(null);
   const [verification, setVerification] = useState<VerificationResponse | null>(null);
   const [isVerifying, setIsVerifying] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<'probes' | 'guardrails' | 'verification' | 'playground'>('probes');
+  const [repoPatch, setRepoPatch] = useState<RepoPatchResponse | null>(null);
+  const [isGeneratingPatch, setIsGeneratingPatch] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'probes' | 'guardrails' | 'verification' | 'playground' | 'repopatch'>('probes');
   const [copied, setCopied] = useState<boolean>(false);
+  const [patchCopied, setPatchCopied] = useState<string | null>(null);
 
   // Playground state
   const [playgroundPrompt, setPlaygroundPrompt] = useState<string>(
@@ -217,6 +231,7 @@ export default function App() {
     setFuzzResults(null);
     setGuardrails(null);
     setVerification(null);
+    setRepoPatch(null);
     setActiveTab('probes');
 
     try {
@@ -259,6 +274,16 @@ export default function App() {
       if (synthRes.ok) {
         const synthData = await synthRes.json();
         setGuardrails(synthData);
+
+        // Pre-generate repo patch artifacts
+        fetch(`${API_BASE}/api/v1/generate-patch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fuzz_results: data, guardrails: synthData })
+        })
+          .then(r => r.json())
+          .then(patchData => setRepoPatch(patchData))
+          .catch(e => console.error("Patch pregeneration warning:", e));
       }
     } catch (err) {
       console.error(err);
@@ -294,6 +319,30 @@ export default function App() {
     }
   };
 
+  const handleFetchRepoPatch = async () => {
+    if (!fuzzResults || !guardrails) return;
+    setIsGeneratingPatch(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/generate-patch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fuzz_results: fuzzResults,
+          guardrails: guardrails
+        })
+      });
+      if (res.ok) {
+        const data: RepoPatchResponse = await res.json();
+        setRepoPatch(data);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate repository patch.");
+    } finally {
+      setIsGeneratingPatch(false);
+    }
+  };
+
   const handleTestPlayground = async () => {
     if (!playgroundPrompt.trim()) return;
     setIsTestingPlayground(true);
@@ -320,10 +369,15 @@ export default function App() {
     }
   };
 
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = (text: string, label?: string) => {
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (label) {
+      setPatchCopied(label);
+      setTimeout(() => setPatchCopied(null), 2000);
+    } else {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const downloadFile = (filename: string, content: string, type: string) => {
@@ -348,7 +402,8 @@ export default function App() {
       owasp_matrix: fuzzResults.owasp_matrix,
       probes: fuzzResults.probes,
       guardrails: guardrails,
-      verification: verification
+      verification: verification,
+      repo_patch: repoPatch
     };
     downloadFile(
       `nemo_sentry_audit_${fuzzResults.summary.target.toLowerCase().replace(/\s+/g, '_')}.json`,
@@ -374,7 +429,7 @@ export default function App() {
               </span>
             </div>
             <p style={{ fontSize: '13px', color: '#9ca3af', margin: '2px 0 0 0' }}>
-              Autonomous Red-Teaming & NVIDIA NeMo Guardrail Synthesizer on Nebius Token Factory
+              Autonomous Red-Teaming, NeMo Guardrail Synthesis & Repo Patcher on Nebius Token Factory
             </p>
           </div>
         </div>
@@ -671,7 +726,7 @@ export default function App() {
 
       {/* Tabs Navigation */}
       <div style={{ display: 'flex', borderBottom: '1px solid #232738', gap: '8px', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button
             onClick={() => setActiveTab('probes')}
             style={{
@@ -750,6 +805,31 @@ export default function App() {
           >
             <Sparkles size={16} color={activeTab === 'playground' ? '#06b6d4' : '#9ca3af'} />
             Live Shield Playground
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('repopatch');
+              if (!repoPatch && fuzzResults && guardrails) {
+                handleFetchRepoPatch();
+              }
+            }}
+            style={{
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === 'repopatch' ? '2px solid #38bdf8' : '2px solid transparent',
+              color: activeTab === 'repopatch' ? '#fff' : '#9ca3af',
+              padding: '10px 16px',
+              fontSize: '14px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <GitPullRequest size={16} color={activeTab === 'repopatch' ? '#38bdf8' : '#9ca3af'} />
+            Agentic Repo Patcher & CI/CD
           </button>
         </div>
 
@@ -1192,6 +1272,158 @@ export default function App() {
                 <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <span style={{ color: '#76b900', fontWeight: 600 }}>Active Rail:</span> {playgroundResult.guarded.protecting_rail}
                 </div>
+              </div>
+
+            </div>
+          )}
+
+        </div>
+      )}
+
+      {/* Tab 5: Agentic Repo Patcher & CI/CD */}
+      {activeTab === 'repopatch' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
+          <div style={{ background: '#151824', border: '1px solid #232738', borderRadius: '12px', padding: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <GitPullRequest size={20} color="#38bdf8" />
+                <h3 style={{ fontSize: '16px', fontWeight: 600, color: '#fff', margin: 0 }}>
+                  Autonomous Repository Injection & CI/CD Guardrail Committer
+                </h3>
+              </div>
+              <p style={{ fontSize: '13px', color: '#9ca3af', margin: '4px 0 0 0' }}>
+                Plans, writes, tests, and patches real repositories with minimal human input (Devpost Agentic Benchmark).
+              </p>
+            </div>
+
+            <button
+              onClick={handleFetchRepoPatch}
+              disabled={isGeneratingPatch || !guardrails}
+              style={{
+                background: 'linear-gradient(135deg, #0284c7 0%, #38bdf8 100%)',
+                color: '#fff',
+                border: 'none',
+                padding: '8px 16px',
+                borderRadius: '6px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: isGeneratingPatch || !guardrails ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              {isGeneratingPatch ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              Regenerate Patch Bundle
+            </button>
+          </div>
+
+          {!repoPatch ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', background: '#151824', borderRadius: '12px', border: '1px solid #232738' }}>
+              <GitBranch size={48} color="#38bdf8" style={{ margin: '0 auto 16px', opacity: 0.8 }} />
+              <h3 style={{ fontSize: '18px', fontWeight: 600, color: '#fff', marginBottom: '8px' }}>Repository Artifacts Ready for Synthesis</h3>
+              <p style={{ fontSize: '13px', color: '#9ca3af', maxWidth: '500px', margin: '0 auto 20px' }}>
+                Run an attack barrage to generate automated git patches and CI/CD security gates for your application repository.
+              </p>
+              <button
+                onClick={handleLaunchScan}
+                style={{ background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
+              >
+                Launch Fuzzing Barrage
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '16px' }}>
+              
+              {/* Card 1: Git Diff Patch */}
+              <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '10px', overflow: 'hidden' }}>
+                <div style={{ background: '#151824', padding: '10px 14px', borderBottom: '1px solid #232738', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <GitBranch size={16} color="#38bdf8" />
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>nemo_guardrails.patch</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => copyToClipboard(repoPatch.git_patch, 'patch')}
+                      style={{ background: '#232738', color: '#9ca3af', border: '1px solid #3b4263', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      {patchCopied === 'patch' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                      {patchCopied === 'patch' ? 'Copied' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={() => downloadFile('nemo_guardrails.patch', repoPatch.git_patch, 'text/plain')}
+                      style={{ background: '#232738', color: '#9ca3af', border: '1px solid #3b4263', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <Download size={12} /> Download
+                    </button>
+                  </div>
+                </div>
+                <pre style={{ margin: 0, padding: '14px', fontSize: '12px', color: '#38bdf8', maxHeight: '350px', overflowY: 'auto', fontFamily: 'monospace' }}>
+                  {repoPatch.git_patch}
+                </pre>
+                <div style={{ background: '#151824', padding: '8px 12px', borderTop: '1px solid #232738', fontSize: '11px', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Terminal size={12} color="#10b981" /> Command: <code>git apply nemo_guardrails.patch</code>
+                </div>
+              </div>
+
+              {/* Card 2: GitHub Actions CI/CD Workflow */}
+              <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '10px', overflow: 'hidden' }}>
+                <div style={{ background: '#151824', padding: '10px 14px', borderBottom: '1px solid #232738', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CheckCircle2 size={16} color="#8b5cf6" />
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>.github/workflows/nemo_sentry_ci.yml</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => copyToClipboard(repoPatch.github_action, 'ci')}
+                      style={{ background: '#232738', color: '#9ca3af', border: '1px solid #3b4263', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      {patchCopied === 'ci' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                      {patchCopied === 'ci' ? 'Copied' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={() => downloadFile('nemo_sentry_ci.yml', repoPatch.github_action, 'text/yaml')}
+                      style={{ background: '#232738', color: '#9ca3af', border: '1px solid #3b4263', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <Download size={12} /> Download
+                    </button>
+                  </div>
+                </div>
+                <pre style={{ margin: 0, padding: '14px', fontSize: '12px', color: '#c084fc', maxHeight: '350px', overflowY: 'auto', fontFamily: 'monospace' }}>
+                  {repoPatch.github_action}
+                </pre>
+                <div style={{ background: '#151824', padding: '8px 12px', borderTop: '1px solid #232738', fontSize: '11px', color: '#9ca3af' }}>
+                  Enforces 0.0% breach threshold on Pull Requests
+                </div>
+              </div>
+
+              {/* Card 3: Standalone Microservice Proxy */}
+              <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '10px', overflow: 'hidden', gridColumn: '1 / -1' }}>
+                <div style={{ background: '#151824', padding: '10px 14px', borderBottom: '1px solid #232738', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Server size={16} color="#76b900" />
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>server.py (Standalone Production NeMo Proxy on Nebius Token Factory)</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => copyToClipboard(repoPatch.server_py, 'server')}
+                      style={{ background: '#232738', color: '#9ca3af', border: '1px solid #3b4263', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      {patchCopied === 'server' ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                      {patchCopied === 'server' ? 'Copied' : 'Copy'}
+                    </button>
+                    <button
+                      onClick={() => downloadFile('server.py', repoPatch.server_py, 'text/x-python')}
+                      style={{ background: '#232738', color: '#9ca3af', border: '1px solid #3b4263', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <Download size={12} /> Download server.py
+                    </button>
+                  </div>
+                </div>
+                <pre style={{ margin: 0, padding: '14px', fontSize: '12px', color: '#86efac', maxHeight: '280px', overflowY: 'auto', fontFamily: 'monospace' }}>
+                  {repoPatch.server_py}
+                </pre>
               </div>
 
             </div>
