@@ -33,16 +33,27 @@ CURATED_THREAT_INTEL = {
     }
 }
 
-async def get_latest_threat_intel(query: str = "Latest LLM prompt injection and jailbreak techniques 2026") -> dict:
+async def get_latest_threat_intel(
+    query: str = "Latest LLM prompt injection and jailbreak techniques 2026",
+    custom_api_key: str = None
+) -> dict:
     """
     Uses Tavily Search API for real-time web threat intelligence, with reliable fallback.
     Returns structured threat intelligence, key findings, and authoritative sources.
+    Supports ephemeral BYOK Tavily key if provided.
     """
-    if _client:
+    active_client = _client
+    if custom_api_key and custom_api_key.strip() and not custom_api_key.startswith("your_"):
+        try:
+            active_client = TavilyClient(api_key=custom_api_key.strip())
+        except Exception as e:
+            print(f"[NeMo-Sentry] Custom BYOK Tavily client init failed: {e}")
+
+    if active_client:
         try:
             # Run synchronous Tavily search in a background thread to keep FastAPI non-blocking
             response = await asyncio.to_thread(
-                _client.search,
+                active_client.search,
                 query=query,
                 search_depth="advanced",
                 max_results=4,

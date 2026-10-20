@@ -160,11 +160,12 @@ async def run_fuzzing_barrage(
     vectors: list[str],
     total_probes: int = 12,
     target_api_key: str = None,
-    nebius_api_key: str = None
+    nebius_api_key: str = None,
+    tavily_api_key: str = None
 ) -> dict:
     """
     Orchestrates the entire red-teaming execution pipeline:
-    1. Fetches real-time web threat intelligence from Tavily API.
+    1. Fetches real-time web threat intelligence from Tavily API (supports BYOK Tavily key).
     2. Nemotron-3-Ultra synthesizes tailored attack probes using Tavily context.
     3. Concurrently dispatches two-tier probes (Naive Baseline vs In-Depth Exploit).
     4. Nemotron-3-Super evaluates breaches.
@@ -180,8 +181,11 @@ async def run_fuzzing_barrage(
         
     probes_per_vector = max(1, total_probes // max(1, len(vectors)))
     
-    # 1. Functional Runtime Call to Tavily Search API
-    threat_intel = await get_latest_threat_intel("Latest LLM prompt injection CVEs and jailbreak techniques 2026")
+    # 1. Functional Runtime Call to Tavily Search API (with BYOK key if provided)
+    threat_intel = await get_latest_threat_intel(
+        "Latest LLM prompt injection CVEs and jailbreak techniques 2026",
+        custom_api_key=tavily_api_key
+    )
     threat_summary = threat_intel.get("summary", "")
     
     # 2. Generate probes in parallel with Nemotron-3-Ultra

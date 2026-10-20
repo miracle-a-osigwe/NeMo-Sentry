@@ -34,6 +34,7 @@ class FuzzRequest(BaseModel):
     num_probes: int = Field(default=8, ge=2, le=30, description="Total number of probes to fire")
     target_api_key: Optional[str] = Field(default=None, description="Optional bearer token for external target")
     nebius_api_key: Optional[str] = Field(default=None, description="Optional ephemeral Nebius API key (BYOK - zero storage)")
+    tavily_api_key: Optional[str] = Field(default=None, description="Optional ephemeral Tavily API key (BYOK - zero storage)")
     client_fingerprint: Optional[str] = Field(default=None, description="Client device hardware fingerprint")
     judge_passcode: Optional[str] = Field(default=None, description="VIP Judge Access Passcode")
 
@@ -91,15 +92,19 @@ def get_attack_taxonomy():
     return ATTACK_TAXONOMY
 
 @app.get("/api/v1/threat-intel")
-async def fetch_threat_intel(query: str = "Latest LLM prompt injection and jailbreak techniques 2026"):
-    """Fetches real-time web threat intelligence using Tavily"""
-    intel = await get_latest_threat_intel(query)
+async def fetch_threat_intel(
+    query: str = "Latest LLM prompt injection and jailbreak techniques 2026",
+    x_tavily_api_key: Optional[str] = Header(None)
+):
+    """Fetches real-time web threat intelligence using Tavily (supports BYOK)"""
+    intel = await get_latest_threat_intel(query, custom_api_key=x_tavily_api_key)
     return intel
 
 @app.post("/api/v1/fuzz")
 async def execute_fuzzing(
     req: FuzzRequest,
     x_nebius_api_key: Optional[str] = Header(None),
+    x_tavily_api_key: Optional[str] = Header(None),
     x_client_fingerprint: Optional[str] = Header(None),
     x_judge_passcode: Optional[str] = Header(None)
 ):
@@ -110,6 +115,7 @@ async def execute_fuzzing(
     """
     # Prefer header if provided, fallback to request body
     effective_nebius_key = x_nebius_api_key or req.nebius_api_key
+    effective_tavily_key = x_tavily_api_key or req.tavily_api_key
     effective_fingerprint = x_client_fingerprint or req.client_fingerprint or "anonymous_device"
     effective_passcode = x_judge_passcode or req.judge_passcode
     
@@ -137,7 +143,8 @@ async def execute_fuzzing(
             vectors=req.attack_vectors,
             total_probes=req.num_probes,
             target_api_key=req.target_api_key,
-            nebius_api_key=effective_nebius_key
+            nebius_api_key=effective_nebius_key,
+            tavily_api_key=effective_tavily_key
         )
         
         # Attach quota status to response payload
