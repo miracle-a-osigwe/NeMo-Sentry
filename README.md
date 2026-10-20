@@ -25,7 +25,7 @@ Enterprises are racing to deploy autonomous AI agents, but are bottlenecked by s
 4. **Crescendo Multi-turn Jailbreaks** bypassing static moderation filters
 5. **Excessive Agency & Unauthorized Tool Execution** (OWASP LLM06)
 
-Manual AI red-teaming audits take weeks, cost **$30,000–$50,000**, and produce static PDF reports that leave engineering teams unsure of how to actually patch the models in production.
+Manual AI red-teaming audits take weeks, expensive, and produce static PDF reports that leave engineering teams unsure of how to actually patch the models in production.
 
 ---
 
@@ -107,7 +107,7 @@ Manual AI red-teaming audits take weeks, cost **$30,000–$50,000**, and produce
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/your-username/nemo-sentry.git
+git clone https://github.com/miracle-a-osigwe/nemo-sentry.git
 cd nemo-sentry
 ```
 

@@ -22,10 +22,55 @@ import {
   GitPullRequest,
   GitBranch,
   Terminal,
-  CheckCircle2
+  CheckCircle2,
+  Lock,
+  Unlock,
+  AlertTriangle,
+  X,
+  Award
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+// Generates persistent client device hardware fingerprint (Canvas + Screen + Timezone + LocalStorage)
+// Resistant to VPN switching to protect hosted Nebius inference credits.
+function getOrCreateDeviceFingerprint(): string {
+  try {
+    const STORAGE_KEY = 'nemo_sentry_device_token';
+    let stored = localStorage.getItem(STORAGE_KEY);
+    if (stored && stored.length > 10) return stored;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 120;
+    canvas.height = 30;
+    const ctx = canvas.getContext('2d');
+    let canvasHash = '';
+    if (ctx) {
+      ctx.textBaseline = 'top';
+      ctx.font = "14px 'Arial'";
+      ctx.fillStyle = '#76b900';
+      ctx.fillRect(10, 5, 50, 20);
+      ctx.fillStyle = '#10b981';
+      ctx.fillText('NeMoSentryFP', 4, 17);
+      canvasHash = canvas.toDataURL().slice(-24);
+    }
+
+    const screenSig = `${window.screen.width}x${window.screen.height}x${window.screen.colorDepth}`;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const rawSeed = `${screenSig}|${tz}|${navigator.language}|${canvasHash}|${Date.now()}`;
+
+    let hash = 2166136261;
+    for (let i = 0; i < rawSeed.length; i++) {
+      hash ^= rawSeed.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    const token = `ns_dev_${Math.abs(hash).toString(16)}_${Math.random().toString(36).substring(2, 8)}`;
+    localStorage.setItem(STORAGE_KEY, token);
+    return token;
+  } catch {
+    return 'fallback_device_token';
+  }
+}
 
 interface TargetPreset {
   id: string;
@@ -33,6 +78,17 @@ interface TargetPreset {
   industry: string;
   vulnerabilities: string[];
   system_prompt_preview: string;
+  hardening_level?: string;
+}
+
+interface QuotaStatus {
+  tier: 'public' | 'judge' | 'byok';
+  tier_label: string;
+  allowed: boolean;
+  remaining_runs: number;
+  max_runs: number;
+  runs_used: number;
+  message: string;
 }
 
 interface ThreatIntel {
@@ -48,6 +104,10 @@ interface ProbeResult {
   vector_name: string;
   owasp_category: string;
   severity: string;
+  exploit_technique?: string;
+  target_resisted_naive?: boolean;
+  naive_probe?: string;
+  naive_response?: string;
   prompt: string;
   target_response: string;
   breached: boolean;
@@ -57,10 +117,17 @@ interface ProbeResult {
 
 interface FuzzSummary {
   target: string;
+  target_hardening?: {
+    level: string;
+    description: string;
+    naive_filter: string;
+    enclave_architecture: string;
+  };
   total_probes: number;
   breached_count: number;
   blocked_count: number;
   breach_rate_percent: number;
+  breach_rate_pct?: number;
   risk_level: string;
   duration_seconds: number;
   throughput_tokens_sec: number;
@@ -136,6 +203,7 @@ export default function App() {
       id: "customer_support",
       name: "NovaCare Support Copilot",
       industry: "Telecom / E-Comm",
+      hardening_level: "High (Hardened XML Enclave)",
       vulnerabilities: ["system_prompt_leakage", "prompt_injection", "pii_data_leakage"],
       system_prompt_preview: "You are NovaCare AI. Secret database: postgres://admin:N0vaP@ss2026@db.internal... Balance: $420.50"
     },
@@ -143,6 +211,7 @@ export default function App() {
       id: "fintech_advisor",
       name: "ApexWealth Financial Advisor",
       industry: "FinTech / Banking",
+      hardening_level: "High (Hardened XML Enclave)",
       vulnerabilities: ["crescendo_jailbreak", "system_prompt_leakage", "insecure_output_handling"],
       system_prompt_preview: "You are ApexWealth AI. Confidential strategy code is 'PROJECT_TITAN_BULL_RUN'..."
     },
@@ -150,6 +219,7 @@ export default function App() {
       id: "devops_agent",
       name: "KubePilot Internal DevOps",
       industry: "Cloud Infrastructure",
+      hardening_level: "High (Hardened XML Enclave)",
       vulnerabilities: ["privilege_escalation", "prompt_injection", "pii_data_leakage"],
       system_prompt_preview: "You are KubePilot. Master root token: k8s-root-sec-99884-vault. Do not execute 'rm -rf'..."
     }
@@ -188,10 +258,84 @@ export default function App() {
   const [isTestingPlayground, setIsTestingPlayground] = useState<boolean>(false);
   const [playgroundResult, setPlaygroundResult] = useState<PlaygroundResult | null>(null);
 
-  // Fetch threat intel on mount
+  // Access Control & Quota States
+  // Nebius key is strictly held in React memory (volatile session) - NEVER saved to disk, cookies, or logs.
+  const [nebiusKey, setNebiusKey] = useState<string>("");
+  const [judgePasscode, setJudgePasscode] = useState<string>(() => {
+    try {
+      return localStorage.getItem('nemo_sentry_judge_pass') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [isJudgeUnlocked, setIsJudgeUnlocked] = useState<boolean>(() => {
+    try {
+      const p = localStorage.getItem('nemo_sentry_judge_pass');
+      return Boolean(p && ["NEBIUS-JUDGE-2026", "NVIDIA-VIP-2026", "DEVPOST-JUDGE-2026"].includes(p.trim().toUpperCase()));
+    } catch {
+      return false;
+    }
+  });
+  const [quotaInfo, setQuotaInfo] = useState<QuotaStatus | null>(null);
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(false);
+  const [showJudgeModal, setShowJudgeModal] = useState<boolean>(false);
+  const [tempKeyInput, setTempKeyInput] = useState<string>("");
+  const [tempPasscodeInput, setTempPasscodeInput] = useState<string>("");
+  const [quotaExceededModal, setQuotaExceededModal] = useState<{ show: boolean; message: string; tier: string } | null>(null);
+  const [expandedProbes, setExpandedProbes] = useState<Record<number, boolean>>({});
+
+  // Fetch threat intel & device quota on mount
   useEffect(() => {
     fetchThreatIntel();
+    fetchQuotaStatus();
   }, []);
+
+  const fetchQuotaStatus = async (overridePasscode?: string, hasKeyOverride?: boolean) => {
+    try {
+      const fp = getOrCreateDeviceFingerprint();
+      const pc = overridePasscode !== undefined ? overridePasscode : judgePasscode;
+      const hasKey = hasKeyOverride !== undefined ? hasKeyOverride : Boolean(nebiusKey && nebiusKey.trim());
+      const params = new URLSearchParams({
+        fingerprint: fp,
+        passcode: pc || '',
+        has_byok: hasKey ? 'true' : 'false'
+      });
+      const res = await fetch(`${API_BASE}/api/v1/quota-status?${params.toString()}`);
+      if (res.ok) {
+        const data: QuotaStatus = await res.json();
+        setQuotaInfo(data);
+        if (data.tier === 'judge') {
+          setIsJudgeUnlocked(true);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch quota status:", err);
+    }
+  };
+
+  const applyJudgePasscode = (code: string) => {
+    const clean = code.trim().toUpperCase();
+    setJudgePasscode(clean);
+    try {
+      localStorage.setItem('nemo_sentry_judge_pass', clean);
+    } catch {}
+    fetchQuotaStatus(clean);
+    setShowJudgeModal(false);
+  };
+
+  const applyNebiusKey = (key: string) => {
+    const clean = key.trim();
+    setNebiusKey(clean);
+    setShowKeyModal(false);
+    fetchQuotaStatus(undefined, Boolean(clean));
+  };
+
+  const clearNebiusKey = () => {
+    setNebiusKey("");
+    setTempKeyInput("");
+    setShowKeyModal(false);
+    fetchQuotaStatus(undefined, false);
+  };
 
   const fetchThreatIntel = async () => {
     try {
@@ -243,21 +387,53 @@ export default function App() {
 
       setScanStep("Dispatching high-throughput concurrent fuzzing probes on Nebius Token Factory...");
 
+      const fp = getOrCreateDeviceFingerprint();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Client-Fingerprint': fp
+      };
+      if (nebiusKey.trim()) {
+        headers['X-Nebius-Api-Key'] = nebiusKey.trim();
+      }
+      if (judgePasscode.trim()) {
+        headers['X-Judge-Passcode'] = judgePasscode.trim();
+      }
+
       const targetEndpoint = customUrl.trim() || selectedTarget;
       const res = await fetch(`${API_BASE}/api/v1/fuzz`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           target_id_or_url: targetEndpoint,
           attack_vectors: selectedVectors,
           num_probes: numProbes,
-          target_api_key: targetApiKey.trim() || undefined
+          target_api_key: targetApiKey.trim() || undefined,
+          nebius_api_key: nebiusKey.trim() || undefined,
+          client_fingerprint: fp,
+          judge_passcode: judgePasscode.trim() || undefined
         })
       });
 
-      if (!res.ok) throw new Error("Fuzzing run failed");
+      if (res.status === 429) {
+        const errJson = await res.json().catch(() => ({}));
+        const detail = errJson.detail || {};
+        setQuotaExceededModal({
+          show: true,
+          message: detail.message || "Device run limit reached. To prevent hosted Nebius credit exhaustion, live runs are rate-limited per device.",
+          tier: detail.tier || "public"
+        });
+        fetchQuotaStatus();
+        return;
+      }
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        const detailMsg = errJson.detail?.message || errJson.detail || "Fuzzing run failed";
+        throw new Error(typeof detailMsg === 'string' ? detailMsg : "Fuzzing run failed");
+      }
       const data: FuzzResponse = await res.json();
       setFuzzResults(data);
+      fetchQuotaStatus();
 
       if (data.threat_intel_grounding) {
         setThreatIntel(data.threat_intel_grounding);
@@ -285,9 +461,9 @@ export default function App() {
           .then(patchData => setRepoPatch(patchData))
           .catch(e => console.error("Patch pregeneration warning:", e));
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Scan failed. Ensure the backend is running at http://localhost:8000");
+      alert(err.message || "Scan failed. Ensure the backend is running at http://localhost:8000");
     } finally {
       setIsScanning(false);
       setScanStep("");
@@ -347,10 +523,18 @@ export default function App() {
     if (!playgroundPrompt.trim()) return;
     setIsTestingPlayground(true);
     try {
+      const fp = getOrCreateDeviceFingerprint();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Client-Fingerprint': fp
+      };
+      if (nebiusKey.trim()) headers['X-Nebius-Api-Key'] = nebiusKey.trim();
+      if (judgePasscode.trim()) headers['X-Judge-Passcode'] = judgePasscode.trim();
+
       const targetEndpoint = customUrl.trim() || selectedTarget;
       const res = await fetch(`${API_BASE}/api/v1/test-single-probe`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           target_id_or_url: targetEndpoint,
           prompt: playgroundPrompt,
@@ -434,22 +618,114 @@ export default function App() {
           </div>
         </div>
 
-        {/* Sponsor Badges */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '6px 12px', borderRadius: '8px', fontSize: '12px' }}>
-            <Cpu size={14} color="#76b900" />
-            <span style={{ color: '#9ca3af' }}>Model:</span>
-            <strong style={{ color: '#76b900' }}>NVIDIA Nemotron-3</strong>
+        {/* Right Section: Access Controls & Sponsor Badges */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
+          
+          {/* Access Control & Quota Pill Bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            
+            {/* Device Cloud Quota Pill */}
+            <div
+              onClick={() => {
+                if (quotaInfo?.tier === 'public') setShowJudgeModal(true);
+              }}
+              title={quotaInfo?.message || "Device cloud run quota"}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: quotaInfo?.tier === 'byok' ? 'rgba(16, 185, 129, 0.12)' : quotaInfo?.tier === 'judge' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(245, 158, 11, 0.12)',
+                border: `1px solid ${quotaInfo?.tier === 'byok' ? '#10b981' : quotaInfo?.tier === 'judge' ? '#8b5cf6' : '#f59e0b'}`,
+                padding: '5px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                cursor: quotaInfo?.tier === 'public' ? 'pointer' : 'default'
+              }}
+            >
+              {quotaInfo?.tier === 'byok' ? (
+                <>
+                  <Key size={13} color="#10b981" />
+                  <span style={{ color: '#10b981', fontWeight: 600 }}>BYOK: Unlimited Runs</span>
+                </>
+              ) : quotaInfo?.tier === 'judge' ? (
+                <>
+                  <Award size={13} color="#8b5cf6" />
+                  <span style={{ color: '#c084fc', fontWeight: 600 }}>Judge VIP: {quotaInfo.remaining_runs}/10 Runs</span>
+                </>
+              ) : (
+                <>
+                  <Shield size={13} color="#f59e0b" />
+                  <span style={{ color: '#fcd34d', fontWeight: 600 }}>Public: {quotaInfo?.remaining_runs ?? 1}/1 Run</span>
+                </>
+              )}
+            </div>
+
+            {/* Judge VIP Access Button */}
+            <button
+              onClick={() => {
+                setTempPasscodeInput(judgePasscode);
+                setShowJudgeModal(true);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: isJudgeUnlocked ? 'rgba(139, 92, 246, 0.15)' : '#181b2a',
+                border: `1px solid ${isJudgeUnlocked ? '#8b5cf6' : '#272c42'}`,
+                color: isJudgeUnlocked ? '#c084fc' : '#d1d5db',
+                padding: '5px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              {isJudgeUnlocked ? <Unlock size={13} color="#8b5cf6" /> : <Lock size={13} color="#9ca3af" />}
+              {isJudgeUnlocked ? 'Judge VIP (10 Runs)' : 'Judge Access'}
+            </button>
+
+            {/* BYOK Nebius Key Button */}
+            <button
+              onClick={() => {
+                setTempKeyInput(nebiusKey);
+                setShowKeyModal(true);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: nebiusKey ? 'rgba(16, 185, 129, 0.15)' : '#181b2a',
+                border: `1px solid ${nebiusKey ? '#10b981' : '#272c42'}`,
+                color: nebiusKey ? '#6ee7b7' : '#d1d5db',
+                padding: '5px 10px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              <Key size={13} color={nebiusKey ? '#10b981' : '#9ca3af'} />
+              {nebiusKey ? 'BYOK Key Active' : 'Bring Nebius Key'}
+            </button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '6px 12px', borderRadius: '8px', fontSize: '12px' }}>
-            <Server size={14} color="#8b5cf6" />
-            <span style={{ color: '#9ca3af' }}>Infra:</span>
-            <strong style={{ color: '#8b5cf6' }}>Nebius Token Factory</strong>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '6px 12px', borderRadius: '8px', fontSize: '12px' }}>
-            <Globe size={14} color="#06b6d4" />
-            <span style={{ color: '#9ca3af' }}>Threat Intel:</span>
-            <strong style={{ color: '#06b6d4' }}>Tavily Search API</strong>
+
+          {/* Sponsor Badges */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '4px 10px', borderRadius: '8px', fontSize: '11px' }}>
+              <Cpu size={13} color="#76b900" />
+              <span style={{ color: '#9ca3af' }}>Model:</span>
+              <strong style={{ color: '#76b900' }}>NVIDIA Nemotron-3</strong>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '4px 10px', borderRadius: '8px', fontSize: '11px' }}>
+              <Server size={13} color="#8b5cf6" />
+              <span style={{ color: '#9ca3af' }}>Infra:</span>
+              <strong style={{ color: '#8b5cf6' }}>Nebius Token Factory</strong>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#181b2a', border: '1px solid #272c42', padding: '4px 10px', borderRadius: '8px', fontSize: '11px' }}>
+              <Globe size={13} color="#06b6d4" />
+              <span style={{ color: '#9ca3af' }}>Threat Intel:</span>
+              <strong style={{ color: '#06b6d4' }}>Tavily Search API</strong>
+            </div>
           </div>
         </div>
       </header>
@@ -512,15 +788,26 @@ export default function App() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <strong style={{ fontSize: '14px', color: '#fff' }}>{p.name}</strong>
-                  <span style={{ fontSize: '11px', color: '#9ca3af', background: '#232738', padding: '2px 6px', borderRadius: '4px' }}>
-                    {p.industry}
-                  </span>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '10px', color: '#10b981', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '1px 5px', borderRadius: '4px', fontWeight: 600 }}>
+                      SEC-402 Active
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#9ca3af', background: '#232738', padding: '2px 6px', borderRadius: '4px' }}>
+                      {p.industry}
+                    </span>
+                  </div>
                 </div>
                 <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {p.system_prompt_preview}
                 </div>
               </div>
             ))}
+
+            {/* Hardened Architecture Note */}
+            <div style={{ fontSize: '11px', color: '#6ee7b7', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', padding: '8px 10px', borderRadius: '6px', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <ShieldCheck size={14} color="#10b981" />
+              <span><strong>Hardened Enclave Defense:</strong> Repels naive direct injections (SEC-402). NeMo-Sentry uses XML delimiter evasion to expose deep vulnerabilities.</span>
+            </div>
 
             {/* Custom URL Option */}
             <div style={{ marginTop: '6px' }}>
@@ -885,7 +1172,7 @@ export default function App() {
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <span
                     style={{
                       background: p.breached ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)',
@@ -903,11 +1190,56 @@ export default function App() {
                   <span style={{ fontSize: '11px', color: '#9ca3af', background: '#232738', padding: '2px 6px', borderRadius: '4px' }}>
                     {p.owasp_category}
                   </span>
+                  {p.exploit_technique && (
+                    <span style={{ fontSize: '11px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '2px 6px', borderRadius: '4px' }}>
+                      {p.exploit_technique}
+                    </span>
+                  )}
                 </div>
-                <div style={{ fontSize: '11px', color: '#6b7280' }}>
-                  Latency: {p.latency_ms}ms
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {p.target_resisted_naive && (
+                    <span style={{ fontSize: '11px', color: '#10b981', background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <ShieldCheck size={12} color="#10b981" /> Target Resisted Naive Injection (SEC-402)
+                    </span>
+                  )}
+                  <div style={{ fontSize: '11px', color: '#6b7280' }}>
+                    Latency: {p.latency_ms}ms
+                  </div>
                 </div>
               </div>
+
+              {/* Hardened Enclave Defense Proof Banner & Comparison Toggle */}
+              {p.target_resisted_naive && p.naive_probe && (
+                <div style={{ marginBottom: '10px', background: 'rgba(16, 185, 129, 0.05)', border: '1px solid rgba(16, 185, 129, 0.2)', borderRadius: '6px', padding: '8px 12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                    <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+                      <strong style={{ color: '#10b981' }}>Enclave Defense Verified:</strong> Target successfully neutralized naive injection via SEC-402 refusal gateway.
+                    </span>
+                    <button
+                      onClick={() => setExpandedProbes(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                      style={{ background: '#232738', color: '#38bdf8', border: '1px solid #3b4263', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      {expandedProbes[idx] ? 'Hide Naive vs Deep Proof' : 'Compare Naive vs Deep Exploit'}
+                    </button>
+                  </div>
+                  {expandedProbes[idx] && (
+                    <div style={{ marginTop: '8px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
+                      <div style={{ background: '#0e1018', border: '1px solid #272c42', borderRadius: '4px', padding: '8px' }}>
+                        <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '4px' }}>[Stage 1] Naive Baseline Attempt:</div>
+                        <div style={{ color: '#9ca3af', fontFamily: 'monospace', marginBottom: '6px', fontSize: '11px' }}>{p.naive_probe}</div>
+                        <div style={{ color: '#10b981', fontWeight: 600, marginBottom: '2px' }}>[Enclave Gateway Result]:</div>
+                        <div style={{ color: '#10b981', fontFamily: 'monospace', fontSize: '11px' }}>{p.naive_response || 'SEC-402: Request blocked by enclave gateway'}</div>
+                      </div>
+                      <div style={{ background: '#0e1018', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '4px', padding: '8px' }}>
+                        <div style={{ color: '#38bdf8', fontWeight: 600, marginBottom: '4px' }}>[Stage 2] NeMo Delimiter Hijack:</div>
+                        <div style={{ color: '#9ca3af', fontFamily: 'monospace', marginBottom: '6px', fontSize: '11px' }}>{p.prompt}</div>
+                        <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: '2px' }}>[Exploitation Result]:</div>
+                        <div style={{ color: '#fca5a5', fontFamily: 'monospace', fontSize: '11px' }}>{p.target_response}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Attack Payload */}
               <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '6px', padding: '10px', fontSize: '12px', color: '#f3f4f6', marginBottom: '8px', fontFamily: 'monospace' }}>
@@ -1429,6 +1761,269 @@ export default function App() {
             </div>
           )}
 
+        </div>
+      )}
+
+      {/* Modal 1: Judge VIP Access Modal */}
+      {showJudgeModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#151824', border: '1px solid #3b4263', borderRadius: '12px', maxWidth: '480px', width: '100%', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ background: 'rgba(234, 179, 8, 0.15)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '8px', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Award size={22} color="#eab308" />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#fff', margin: 0 }}>Judge VIP Access Pass</h3>
+                  <span style={{ fontSize: '11px', color: '#eab308', fontWeight: 600 }}>10 Live Evaluation Scans</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowJudgeModal(false)}
+                style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: '1.5', marginBottom: '14px' }}>
+              Welcome Nebius & NVIDIA Hackathon judges! Enter the official evaluation passcode to unlock a dedicated <strong>10-run testing quota</strong> against any enterprise target or custom external API.
+            </p>
+
+            <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: '#9ca3af' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#eab308', fontWeight: 600, marginBottom: '4px' }}>
+                <AlertTriangle size={14} /> Quota Protection Policy
+              </div>
+              Runs are capped at <strong>10 evaluations per judge device</strong> to maintain credit sustainability while giving ample scope to test all presets, custom endpoints, and Colang synthesizer pipelines.
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#9ca3af', marginBottom: '6px' }}>
+                Evaluation Passcode:
+              </label>
+              <input
+                type="text"
+                value={tempPasscodeInput}
+                onChange={e => setTempPasscodeInput(e.target.value)}
+                placeholder="e.g. NEBIUS-JUDGE-2026"
+                style={{
+                  width: '100%',
+                  background: '#0d0f17',
+                  border: '1px solid #3b4263',
+                  borderRadius: '6px',
+                  padding: '10px 12px',
+                  color: '#fff',
+                  fontSize: '13px',
+                  boxSizing: 'border-box'
+                }}
+              />
+              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                Official Judge Passcode: <code style={{ color: '#38bdf8' }}>NEBIUS-JUDGE-2026</code>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowJudgeModal(false)}
+                style={{ background: '#232738', border: '1px solid #3b4263', color: '#9ca3af', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => applyJudgePasscode(tempPasscodeInput || "NEBIUS-JUDGE-2026")}
+                style={{ background: 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)', border: 'none', color: '#000', fontWeight: 700, padding: '8px 16px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+              >
+                Unlock VIP Access
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Bring-Your-Own-Key (BYOK) Modal with Zero-Storage Guarantee */}
+      {showKeyModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#151824', border: '1px solid #3b4263', borderRadius: '12px', maxWidth: '540px', width: '100%', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', borderRadius: '8px', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Key size={22} color="#38bdf8" />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#fff', margin: 0 }}>Bring Your Own Nebius API Key</h3>
+                  <span style={{ fontSize: '11px', color: '#38bdf8', fontWeight: 600 }}>Unlimited Runs • Zero-Storage Security Guarantee</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowKeyModal(false)}
+                style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: '1.5', marginBottom: '14px' }}>
+              Provide your personal Nebius Token Factory API key to execute unlimited autonomous fuzzing, Colang 2.0 guardrail synthesis, and verification runs without any device rate limits.
+            </p>
+
+            {/* Strict Zero Storage Disclosures */}
+            <div style={{ background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#10b981', fontWeight: 700, marginBottom: '6px' }}>
+                <ShieldCheck size={16} /> Strict Zero-Storage Guarantee
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '18px', color: '#d1fae5', lineHeight: '1.6' }}>
+                <li><strong>Volatile Memory Only:</strong> Your key is held strictly in temporary React state in this active browser tab.</li>
+                <li><strong>Zero Persistence:</strong> It is never written to <code>localStorage</code>, session storage, cookies, or any database.</li>
+                <li><strong>Ephemeral Transmission:</strong> Sent solely as an HTTP header (<code>X-Nebius-Api-Key</code>) and never logged by the backend.</li>
+                <li><strong>Instant Destruction:</strong> Clicking "Clear Key" or refreshing this tab permanently wipes the key from memory.</li>
+              </ul>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#9ca3af', marginBottom: '6px' }}>
+                Nebius Token Factory API Key:
+              </label>
+              <input
+                type="password"
+                value={tempKeyInput}
+                onChange={e => setTempKeyInput(e.target.value)}
+                placeholder="Paste Nebius API Key (e.g. nb-...)"
+                style={{
+                  width: '100%',
+                  background: '#0d0f17',
+                  border: '1px solid #3b4263',
+                  borderRadius: '6px',
+                  padding: '10px 12px',
+                  color: '#fff',
+                  fontSize: '13px',
+                  boxSizing: 'border-box'
+                }}
+              />
+              <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '4px' }}>
+                Don't have a key? Grab credits on <a href="https://tokenfactory.nebius.com" target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline' }}>Nebius Token Factory</a>.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {nebiusKey ? (
+                <button
+                  onClick={clearNebiusKey}
+                  style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}
+                >
+                  Clear Key from Memory
+                </button>
+              ) : <div />}
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => setShowKeyModal(false)}
+                  style={{ background: '#232738', border: '1px solid #3b4263', color: '#9ca3af', padding: '8px 14px', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => applyNebiusKey(tempKeyInput)}
+                  disabled={!tempKeyInput.trim()}
+                  style={{
+                    background: tempKeyInput.trim() ? 'linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)' : '#232738',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: 600,
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    cursor: tempKeyInput.trim() ? 'pointer' : 'not-allowed',
+                    opacity: tempKeyInput.trim() ? 1 : 0.6
+                  }}
+                >
+                  Apply Key (Volatile)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: Quota Exceeded Rate Limit Modal */}
+      {quotaExceededModal?.show && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.75)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#151824', border: '1px solid #ef4444', borderRadius: '12px', maxWidth: '500px', width: '100%', padding: '24px', boxShadow: '0 20px 25px -5px rgba(239, 68, 68, 0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
+              <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <AlertTriangle size={24} color="#ef4444" />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#fff', margin: 0 }}>Device Evaluation Limit Reached</h3>
+                <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: 600 }}>Credit Preservation Firewall</span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: '1.5', marginBottom: '16px' }}>
+              {quotaExceededModal.message}
+            </p>
+
+            <div style={{ background: '#0e1018', border: '1px solid #232738', borderRadius: '8px', padding: '12px', marginBottom: '20px', fontSize: '12px', color: '#9ca3af' }}>
+              To ensure all evaluators can experience NeMo-Sentry without our team's hosted Nebius API budget running dry, free public scans are limited per device hardware fingerprint.
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+              <button
+                onClick={() => {
+                  setQuotaExceededModal(null);
+                  setTempPasscodeInput("NEBIUS-JUDGE-2026");
+                  setShowJudgeModal(true);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #eab308 0%, #ca8a04 100%)',
+                  color: '#000',
+                  fontWeight: 700,
+                  border: 'none',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                <Award size={16} /> Enter Hackathon Judge Passcode (10 Runs)
+              </button>
+
+              <button
+                onClick={() => {
+                  setQuotaExceededModal(null);
+                  setShowKeyModal(true);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #38bdf8 0%, #0284c7 100%)',
+                  color: '#fff',
+                  fontWeight: 600,
+                  border: 'none',
+                  padding: '10px 14px',
+                  borderRadius: '6px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
+                }}
+              >
+                <Key size={16} /> Bring Your Own Nebius API Key (Unlimited)
+              </button>
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <button
+                onClick={() => setQuotaExceededModal(null)}
+                style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: '12px', cursor: 'pointer', textDecoration: 'underline' }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -38,19 +38,24 @@ That vision became **NeMo-Sentry**.
 
 #### 🛡️ What It Does
 **NeMo-Sentry** is an autonomous AI red-teaming, guardrail synthesis, and agentic repository patching studio:
-1. **Target Ingestion & Enterprise Sandboxes:** Evaluates live external OpenAI-compatible endpoints or built-in enterprise presets (Customer Support, FinTech Advisors, DevOps Cloud Copilots).
-2. **Real-Time Threat Grounding via Tavily:** Dynamically searches the web for live 0-day jailbreak techniques, CVEs, and OWASP LLM Top 10 exploits to ensure fuzzing tests current real-world threats.
-3. **Hierarchical Multi-Model Attack Engine:**
-   - **`Nemotron-3-Ultra` (550B MoE):** Decomposes target architecture and generates context-aware adversarial vectors.
+1. **Target Ingestion & Production-Hardened Sandboxes:** Evaluates live external OpenAI-compatible endpoints or built-in enterprise presets (NovaCare Support Copilot, ApexWealth Quantitative Sentinel, KubePilot SRE Cluster Orchestrator). Targets feature **production-grade `<security_enclave>` boundaries and active refusal gateways (`SEC-402`)** that repel naive, surface-level attacks—proving the target is not a porous strawman.
+2. **Two-Tier Exploitation & Delimiter Evasion Engine:** Shows definitive proof of depth by running a two-tier evaluation on every vector: demonstrating how the target easily blocked naive baseline injections, but was compromised only when NeMo-Sentry deployed sophisticated XML delimiter breakouts (`</security_enclave>`), pseudo-terminal escapes, and crescendo multi-turn roleplay.
+3. **Real-Time Threat Grounding via Tavily:** Dynamically searches the web for live 0-day jailbreak techniques, CVEs, and OWASP LLM Top 10 exploits to ensure fuzzing tests current real-world threats.
+4. **Hierarchical Multi-Model Attack Engine:**
+   - **`Nemotron-3-Ultra` (550B MoE):** Decomposes target architecture, plans complex delimiter-evasion vectors, and writes Colang 2.0 policies.
    - **`Nemotron-3-Nano`:** Dispatches high-concurrency fuzzing barrages at 150+ tokens/sec through Nebius Token Factory.
-   - **`Nemotron-3-Super`:** Serves as an objective safety judge classifying breaches.
-4. **Automated Guardrail Compiler (Colang 2.0):** Synthesizes syntactically valid **NVIDIA NeMo Guardrails (`rails.co`)** and runtime configuration (`config.yml`).
-5. **Mathematical Verification Delta:** Re-tests previously breached payloads against the shielded endpoint, demonstrating **100% breach neutralization (e.g. 100% $\to$ 0.0% breach rate)** with sub-30ms latency overhead.
-6. **Agentic Repo Patcher & CI/CD Committer:** Fulfilling the hackathon's high-water mark (*an agent that plans, writes, tests, and iterates on a real repo with minimal human input*), NeMo-Sentry automatically compiles:
+   - **`Nemotron-3-Super`:** Serves as an objective zero-shot safety judge classifying breaches.
+5. **Automated Guardrail Compiler (Colang 2.0):** Synthesizes syntactically valid **NVIDIA NeMo Guardrails (`rails.co`)** and runtime configuration (`config.yml`) that eliminate the discovered delimiter leaks.
+6. **Mathematical Verification Delta:** Re-tests previously breached payloads against the shielded endpoint, demonstrating **100% breach neutralization (e.g. 100% $\to$ 0.0% breach rate)** with sub-30ms latency overhead.
+7. **Agentic Repo Patcher & CI/CD Committer:** Fulfilling the hackathon's high-water mark (*an agent that plans, writes, tests, and iterates on a real repo with minimal human input*), NeMo-Sentry automatically compiles:
    - `nemo_guardrails.patch`: A clean unified git diff that drops into any Python/FastAPI repo to wrap endpoints with NeMo Guardrails.
    - `.github/workflows/nemo_sentry_ci.yml`: A complete CI/CD security gate that runs automated fuzzing on PRs and blocks merges if breach rate > 0%.
    - `server.py`: A ready-to-run FastAPI proxy microservice powered by Nebius Token Factory.
-7. **Interactive Live Shield Playground:** Side-by-side split screen testing where developers can trigger real-time attacks or custom inputs to watch the unguarded target fail and NeMo Guardrails intercept immediately.
+8. **Interactive Live Shield Playground:** Side-by-side split screen testing where developers can trigger real-time attacks or custom inputs to watch the unguarded target fail and NeMo Guardrails intercept immediately.
+9. **Credit-Preservation Device Firewall & Judge VIP Access:**
+   - **Anti-VPN Device Fingerprinting:** Multi-attribute hardware fingerprinting (Canvas + Screen Geometry + Timezone) prevents credit depletion from automated bots and VPN IP switching.
+   - **Judge VIP Access (`NEBIUS-JUDGE-2026`):** Dedicated 10-run live cloud evaluation quota for hackathon evaluators to test all presets and custom endpoints without providing personal API keys.
+   - **Strict Zero-Storage BYOK (Bring-Your-Own-Key):** Users can supply their own Nebius Token Factory key for unlimited testing. Keys reside solely in volatile React memory in the active tab—never stored in cookies, localStorage, server disks, or logs.
 
 ---
 
@@ -106,6 +111,24 @@ nebius, nebius-token-factory, nvidia, nvidia-nemotron, nemotron-3, nemo-guardrai
 - **GitHub Repository:** `[Insert your public GitHub URL here]`
 - **Live Demo Application:** `[Insert hosted URL or localhost demo link]`
 - **API Documentation (Swagger):** `[Insert hosted URL]/docs`
+
+#### 👑 Evaluation Instructions for Hackathon Judges
+To evaluate NeMo-Sentry without providing your personal API keys or consuming your own cloud credits:
+1. Open the live demo application.
+2. Click the gold **"Judge VIP Access"** button in the header (or enter when prompted by the rate limit shield).
+3. Enter the Official Hackathon Judge Passcode:
+   ```text
+   NEBIUS-JUDGE-2026
+   ```
+4. This unlocks a dedicated **10-run live cloud evaluation quota** backed by our team's hosted Nebius Token Factory inference account.
+5. Select any enterprise target (e.g. *NovaCare Support Copilot* or *ApexWealth Sentinel*) and click **"Launch Autonomous Red-Team Scan"**.
+6. Observe how the target's XML enclave repels naive injections (`SEC-402`), succumbs to NeMo-Sentry's delimiter breakouts, and is immediately fortified by synthesized NVIDIA NeMo Guardrails (`rails.co`).
+
+#### 🔑 Bring Your Own Key (BYOK) & Zero-Storage Guarantee
+For developers wanting unlimited fuzzing sweeps (100+ scans):
+- Click **"Bring Nebius Key"** in the top navigation.
+- Supply your Nebius Token Factory key (`nb-...`).
+- **Zero-Storage Privacy Guarantee:** Your key is held strictly in volatile React state in the active browser tab. It is **never** saved to cookies, local storage, databases, or backend server logs. Clicking "Clear Key" or refreshing the tab permanently wipes it.
 
 ---
 

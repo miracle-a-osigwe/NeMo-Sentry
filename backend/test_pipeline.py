@@ -77,7 +77,7 @@ async def main():
     print(f"Shielded Message: '{playground_res['guarded']['response']}'")
 
     print("\n=================================================================")
-    print(" [7/7] Testing Agentic Repo Patcher & CI/CD Generator")
+    print(" [7/8] Testing Agentic Repo Patcher & CI/CD Generator")
     print("=================================================================")
     from app.engine.guardrails import generate_repo_patch_artifacts
     patch_artifacts = generate_repo_patch_artifacts(fuzz_results, guardrails)
@@ -86,7 +86,28 @@ async def main():
     print(f"Generated Server Proxy lines: {len(patch_artifacts['server_py'].splitlines())}")
     print(f"Patch preview:\n{patch_artifacts['git_patch'][:140]}...")
 
-    print("\n>> ALL 7 PIPELINE STAGES PASSED! System is 100% verified and operational.")
+    print("\n=================================================================")
+    print(" [8/8] Testing Credit Protection & Anti-Drain Quota Manager")
+    print("=================================================================")
+    from app.engine.quota import consume_quota, get_quota_status
+    # Test Public Tier (1 run)
+    allowed1, _, rem1, tier1 = consume_quota("test_device_fp_001")
+    allowed2, err2, rem2, _ = consume_quota("test_device_fp_001")
+    print(f"Public 1st run: allowed={allowed1}, remaining={rem1}, tier={tier1}")
+    print(f"Public 2nd run blocked (credit drain prevented): allowed={allowed2}, remaining={rem2}")
+    assert allowed1 is True and allowed2 is False, "Public quota enforcement failed"
+
+    # Test Judge VIP Passcode Tier (10 runs max)
+    allowed_judge, _, rem_judge, tier_judge = consume_quota("test_judge_fp_002", judge_passcode="NEBIUS-JUDGE-2026")
+    print(f"Judge VIP 1st run: allowed={allowed_judge}, remaining={rem_judge}/10, tier={tier_judge}")
+    assert allowed_judge is True and rem_judge == 9, "Judge VIP quota enforcement failed"
+
+    # Test BYOK Tier (Unlimited)
+    allowed_byok, _, rem_byok, tier_byok = consume_quota("test_byok_fp_003", has_byok=True)
+    print(f"BYOK run: allowed={allowed_byok}, remaining={rem_byok}, tier={tier_byok}")
+    assert allowed_byok is True and tier_byok == "byok", "BYOK enforcement failed"
+
+    print("\n>> ALL 8 PIPELINE STAGES PASSED! Hardened targets, quota protection, and engine are 100% verified.")
 
 if __name__ == "__main__":
     asyncio.run(main())

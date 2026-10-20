@@ -13,6 +13,8 @@ NEMOTRON_ULTRA = "nvidia/nemotron-3-ultra"   # 550B MoE for frontier reasoning &
 NEMOTRON_SUPER = "nvidia/nemotron-3-super"   # 120B Transformer-Mamba MoE for evaluation
 NEMOTRON_NANO  = "nvidia/nemotron-3-nano"    # High-throughput compact model for fuzzing
 
+import httpx
+
 def get_client(custom_api_key: str = None) -> AsyncOpenAI | None:
     """Returns an initialized AsyncOpenAI client if an API key is available."""
     api_key = custom_api_key or os.getenv("NEBIUS_API_KEY", "")
@@ -21,6 +23,7 @@ def get_client(custom_api_key: str = None) -> AsyncOpenAI | None:
             return AsyncOpenAI(
                 base_url=NEBIUS_BASE_URL,
                 api_key=api_key,
+                http_client=httpx.AsyncClient(),
             )
         except Exception as e:
             print(f"[NeMo-Sentry] Nebius client initialization failed: {e}")
