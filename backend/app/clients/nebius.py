@@ -38,7 +38,7 @@ def get_client(custom_api_key: str = None) -> AsyncOpenAI | None:
             return AsyncOpenAI(
                 base_url=_resolve_nebius_base_url(),
                 api_key=api_key,
-                timeout=22.0,
+                timeout=50.0,
             )
         except Exception as e:
             print(f"[NeMo-Sentry] Nebius client initialization failed: {e}")

@@ -118,6 +118,73 @@ def is_refusal_response(resp: str) -> bool:
     return any(sig in resp_lower for sig in refusal_signatures)
 
 
+class TargetConnectionError(Exception):
+    """Raised when an external custom target endpoint is unreachable, invalid, or fails to respond."""
+    pass
+
+
+async def verify_custom_endpoint_health(url: str, api_key: str = None) -> None:
+    """
+    Performs a fast pre-flight validation check against an external custom target endpoint URL.
+    Validates DNS resolution, network reachability, and basic endpoint response.
+    Raises TargetConnectionError if the endpoint is unreachable or invalid.
+    """
+    cleaned_url = (url or "").strip()
+    if not (cleaned_url.startswith("http://") or cleaned_url.startswith("https://")):
+        raise TargetConnectionError(
+            f"Custom target URL must begin with http:// or https:// (received: '{cleaned_url}')"
+        )
+
+    dummy_hosts = ["my-llm-service.com", "example.com", "placeholder", "your-api.com"]
+    if any(d in cleaned_url.lower() for d in dummy_hosts):
+        raise TargetConnectionError(
+            f"Invalid target endpoint '{cleaned_url}'. Please provide a real, reachable OpenAI-compatible LLM endpoint URL."
+        )
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    test_payload = {
+        "model": "default",
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 10,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.post(cleaned_url, json=test_payload, headers=headers)
+            # 200: fully functional.
+            # 400 or 422: endpoint is live and parsed JSON (may need a specific model name).
+            # 401 or 403: auth failure.
+            if res.status_code in (401, 403):
+                raise TargetConnectionError(
+                    f"Authentication failed on custom target endpoint '{cleaned_url}' (HTTP {res.status_code}). Please supply a valid Target Bearer Token."
+                )
+            if res.status_code == 404:
+                raise TargetConnectionError(
+                    f"Custom target endpoint '{cleaned_url}' returned HTTP 404 Not Found. Please verify the URL path (e.g. /v1/chat/completions)."
+                )
+            if res.status_code >= 500:
+                raise TargetConnectionError(
+                    f"Custom target endpoint '{cleaned_url}' returned HTTP {res.status_code} Server Error: {res.text[:200]}"
+                )
+    except httpx.ConnectError as e:
+        raise TargetConnectionError(
+            f"Cannot connect to custom target endpoint '{cleaned_url}': DNS resolution failed or host is unreachable ({str(e)})."
+        )
+    except httpx.TimeoutException:
+        raise TargetConnectionError(
+            f"Connection timed out while reaching target endpoint '{cleaned_url}' (8.0s limit)."
+        )
+    except TargetConnectionError:
+        raise
+    except Exception as e:
+        raise TargetConnectionError(
+            f"Failed to communicate with custom target endpoint '{cleaned_url}': {str(e)}"
+        )
+
+
 async def call_target(
     target_id_or_url: str,
     prompt: str = None,
@@ -130,6 +197,7 @@ async def call_target(
     Sends probe to either a preset hardened target (powered by Nebius Token Factory OpenAI SDK
     with live editable system prompt support) or an external live HTTP endpoint.
     Supports either a single prompt or multi-turn conversational message history.
+    Raises TargetConnectionError if an external endpoint is unreachable or returns an error.
     """
     effective_prompt = prompt or (messages[-1]["content"] if messages else "")
     if target_id_or_url in PRESET_TARGETS:
@@ -145,38 +213,40 @@ async def call_target(
     if target_id_or_url.startswith("http://") or target_id_or_url.startswith(
         "https://"
     ):
+        headers = {"Content-Type": "application/json"}
+        if target_api_key:
+            headers["Authorization"] = f"Bearer {target_api_key}"
+
+        payload_messages = messages or [
+            {"role": "user", "content": effective_prompt}
+        ]
+        payload = {
+            "model": "default",
+            "messages": payload_messages,
+            "max_tokens": 512,
+            "temperature": 0.7,
+        }
+
         try:
-            headers = {"Content-Type": "application/json"}
-            if target_api_key:
-                headers["Authorization"] = f"Bearer {target_api_key}"
-
-            payload_messages = messages or [
-                {"role": "user", "content": effective_prompt}
-            ]
-            payload = {
-                "model": "default",
-                "messages": payload_messages,
-                "max_tokens": 512,
-                "temperature": 0.7,
-            }
-
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(target_id_or_url, json=payload, headers=headers)
                 if res.status_code == 200:
                     data = res.json()
                     if "choices" in data and len(data["choices"]) > 0:
                         return data["choices"][0]["message"]["content"]
                     return str(data)
-                return f"[Target API Error: HTTP {res.status_code}] {res.text[:200]}"
+                raise TargetConnectionError(
+                    f"Custom target endpoint '{target_id_or_url}' returned HTTP {res.status_code}: {res.text[:200]}"
+                )
+        except TargetConnectionError:
+            raise
         except Exception as e:
-            return f"[Connection Error to {target_id_or_url}]: {str(e)}"
+            raise TargetConnectionError(
+                f"Custom target endpoint '{target_id_or_url}' connection error: {str(e)}"
+            )
 
-    return await execute_or_simulate_target_response(
-        "customer_support",
-        effective_prompt,
-        custom_system_prompt=custom_system_prompt,
-        nebius_api_key=nebius_api_key,
-        messages=messages,
+    raise TargetConnectionError(
+        f"Target '{target_id_or_url}' is not a recognized preset ({list(PRESET_TARGETS.keys())}) or reachable HTTP URL."
     )
 
 

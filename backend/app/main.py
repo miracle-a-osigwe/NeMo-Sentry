@@ -7,7 +7,7 @@ from typing import List, Optional
 import os
 
 from app.engine.taxonomy import ATTACK_TAXONOMY
-from app.engine.targets import PRESET_TARGETS
+from app.engine.targets import PRESET_TARGETS, TargetConnectionError
 from app.engine.fuzzer import run_fuzzing_barrage, test_single_probe_playground
 from app.engine.guardrails import synthesize_guardrails, verify_guardrails, generate_repo_patch_artifacts
 from app.engine.quota import consume_quota, get_quota_status
@@ -184,6 +184,17 @@ async def execute_fuzzing(
             "has_byok": bool(effective_nebius_key)
         }
         return results
+    except TargetConnectionError as tce:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "TARGET_UNREACHABLE",
+                "message": str(tce),
+                "target": req.target_id_or_url,
+            },
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fuzzing engine error: {str(e)}")
 
@@ -200,6 +211,17 @@ async def execute_single_probe_test(req: SingleProbeRequest):
             target_api_key=req.target_api_key
         )
         return result
+    except TargetConnectionError as tce:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "TARGET_UNREACHABLE",
+                "message": str(tce),
+                "target": req.target_id_or_url,
+            },
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Playground test error: {str(e)}")
 

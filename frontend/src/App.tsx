@@ -269,6 +269,7 @@ export default function App() {
   ]);
 
   const [selectedTarget, setSelectedTarget] = useState<string>("customer_support");
+  const [isCustomMode, setIsCustomMode] = useState<boolean>(false);
   const [customUrl, setCustomUrl] = useState<string>("");
   const [targetApiKey, setTargetApiKey] = useState<string>("");
   const [showAuthField, setShowAuthField] = useState<boolean>(false);
@@ -758,6 +759,22 @@ export default function App() {
   };
 
   const handleLaunchScan = async () => {
+    if (isCustomMode) {
+      const trimmed = customUrl.trim();
+      if (!trimmed) {
+        alert("Please enter a custom OpenAI-compatible endpoint URL (e.g. https://api.my-company.com/v1/chat/completions) before launching the audit.");
+        return;
+      }
+      if (trimmed.includes("my-llm-service.com") || trimmed.includes("example.com")) {
+        alert("The target endpoint appears to be a placeholder ('my-llm-service.com'). Please enter a real, reachable OpenAI-compatible endpoint URL.");
+        return;
+      }
+      if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        alert("Custom endpoint URL must begin with http:// or https://");
+        return;
+      }
+    }
+
     setIsScanning(true);
     setIsHudExpanded(true);
     setFuzzResults(null);
@@ -777,8 +794,9 @@ export default function App() {
       packaging_patch: false
     });
 
-    const targetLabel = customUrl.trim() ? `Custom (${customUrl.trim()})` : presets.find(p => p.id === selectedTarget)?.name || selectedTarget;
-    const targetIndustry = presets.find(p => p.id === selectedTarget)?.industry || 'Enterprise API';
+    const isCustomActive = isCustomMode && !!customUrl.trim();
+    const targetLabel = isCustomActive ? `Custom Endpoint (${customUrl.trim()})` : presets.find(p => p.id === selectedTarget)?.name || selectedTarget;
+    const targetIndustry = isCustomActive ? 'External Custom API' : presets.find(p => p.id === selectedTarget)?.industry || 'Enterprise API';
 
     let barrageTicker: ReturnType<typeof setInterval> | null = null;
 
@@ -862,7 +880,7 @@ export default function App() {
         }
       }, 1100);
 
-      const targetEndpoint = customUrl.trim() || selectedTarget;
+      const targetEndpoint = isCustomActive ? customUrl.trim() : selectedTarget;
       const res = await fetch(`${API_BASE}/api/v1/fuzz`, {
         method: 'POST',
         headers,
@@ -903,8 +921,8 @@ export default function App() {
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        const detailMsg = errJson.detail?.message || errJson.detail || "Fuzzing run failed";
-        throw new Error(typeof detailMsg === 'string' ? detailMsg : "Fuzzing run failed");
+        const detailMsg = errJson.detail?.message || (typeof errJson.detail === 'string' ? errJson.detail : "Target endpoint connection error or invalid configuration.");
+        throw new Error(detailMsg);
       }
       const data: FuzzResponse = await res.json();
       fetchQuotaStatus();
@@ -1652,12 +1670,13 @@ export default function App() {
             </span>
 
             {presets.map(p => {
-              const isSelected = selectedTarget === p.id && !customUrl;
+              const isSelected = !isCustomMode && selectedTarget === p.id;
               return (
                 <button
                   key={p.id}
                   onClick={() => {
                     setSelectedTarget(p.id);
+                    setIsCustomMode(false);
                     setCustomUrl('');
                     setFuzzResults(null);
                     setGuardrails(null);
@@ -1675,10 +1694,13 @@ export default function App() {
 
             <button
               onClick={() => {
-                if (!customUrl) setCustomUrl('https://my-llm-service.com/v1');
-                else setCustomUrl('');
+                const nextMode = !isCustomMode;
+                setIsCustomMode(nextMode);
+                if (!nextMode) {
+                  setCustomUrl('');
+                }
               }}
-              className={`scenario-btn scenario-btn-dashed ${customUrl ? 'scenario-btn-dashed-active' : ''}`}
+              className={`scenario-btn scenario-btn-dashed ${isCustomMode ? 'scenario-btn-dashed-active' : ''}`}
             >
               + Custom API Endpoint
             </button>
@@ -1703,7 +1725,7 @@ export default function App() {
           </div>
 
           {/* Inline Custom Endpoint Input (Only shown if Custom API Endpoint is toggled) */}
-          {customUrl && (
+          {isCustomMode && (
             <div style={{
               display: 'flex',
               gap: '8px',
@@ -2704,7 +2726,12 @@ export default function App() {
                   /* AUTONOMOUS ATTACK & PATCH LIVE CHAT INTERFACE (Managed by NeMo-Sentry) */
                   (() => {
                     const targetPreset = presets.find(p => p.id === selectedTarget);
-                    const targetName = targetPreset?.name || 'Target Enclave LLM';
+                    const isCustomActive = isCustomMode && !!customUrl.trim();
+                    const targetName = isCustomActive 
+                      ? `Custom Target (${customUrl.trim().replace(/^https?:\/\//, '')})`
+                      : (fuzzResults?.summary?.target && !fuzzResults.summary.target.startsWith('http') 
+                          ? fuzzResults.summary.target 
+                          : targetPreset?.name || 'Target Enclave LLM');
 
                     // 1. STANDBY RADAR STATE: Displayed when no scan has been launched yet and not currently scanning
                     if (!fuzzResults && !isScanning) {
@@ -3302,7 +3329,7 @@ export default function App() {
                                       <div className="procedural-turn-divider">
                                         <div style={{ flex: 1, height: '1px', background: '#e6e2d6' }} />
                                         <span className="procedural-turn-badge">
-                                          TURN {turn.turn}: {turn.stage_label.toUpperCase()}
+                                          TURN {turn.turn}: {(turn.stage_label || '').replace(/^turn\s*\d+:\s*/i, '').toUpperCase()}
                                         </span>
                                         <div style={{ flex: 1, height: '1px', background: '#e6e2d6' }} />
                                       </div>
