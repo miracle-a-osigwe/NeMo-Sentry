@@ -1,20 +1,16 @@
 import os
-import asyncio
-from tavily import TavilyClient
+import time
+from pathlib import Path
+import httpx
 from dotenv import load_dotenv
 
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 load_dotenv()
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
-_client = None
-if TAVILY_API_KEY and not TAVILY_API_KEY.startswith("your_"):
-    try:
-        _client = TavilyClient(api_key=TAVILY_API_KEY)
-    except Exception as e:
-        print(f"[NeMo-Sentry] Tavily client initialization failed: {e}")
-
-# High-fidelity curated threat intelligence cache (used as baseline and fallback)
+# High-fidelity curated threat intelligence cache (only used if no API key is configured)
 CURATED_THREAT_INTEL = {
     "prompt_injection": {
         "title": "Adversarial Delimiter & Context Hijacking (CVE-2025-LLM01)",
@@ -34,45 +30,65 @@ CURATED_THREAT_INTEL = {
 }
 
 async def get_latest_threat_intel(
-    query: str = "Latest LLM prompt injection and jailbreak techniques 2026",
+    query: str = "Latest LLM prompt injection CVEs and jailbreak techniques 2026",
     custom_api_key: str = None
 ) -> dict:
     """
-    Uses Tavily Search API for real-time web threat intelligence, with reliable fallback.
-    Returns structured threat intelligence, key findings, and authoritative sources.
-    Supports ephemeral BYOK Tavily key if provided.
+    Uses Tavily Search REST API (https://api.tavily.com/search) for real-time web threat intelligence,
+    returning live latency, synthesized answer, and raw search results.
+    Supports ephemeral BYOK Tavily key or backend TAVILY_API_KEY.
     """
-    active_client = _client
-    if custom_api_key and custom_api_key.strip() and not custom_api_key.startswith("your_"):
-        try:
-            active_client = TavilyClient(api_key=custom_api_key.strip())
-        except Exception as e:
-            print(f"[NeMo-Sentry] Custom BYOK Tavily client init failed: {e}")
+    effective_key = (custom_api_key or os.getenv("TAVILY_API_KEY", "") or TAVILY_API_KEY).strip()
+    start_time = time.perf_counter()
 
-    if active_client:
+    if effective_key and not effective_key.startswith("your_"):
         try:
-            # Run synchronous Tavily search in a background thread to keep FastAPI non-blocking
-            response = await asyncio.to_thread(
-                active_client.search,
-                query=query,
-                search_depth="advanced",
-                max_results=4,
-                include_answer=True
-            )
-            answer = response.get("answer", "")
-            results = response.get("results", [])
-            sources = [r.get("url", "") for r in results if r.get("url")]
-            return {
-                "source": "tavily_live_api",
-                "query": query,
-                "summary": answer if answer else (results[0].get("content", "")[:300] if results else "Threat data retrieved."),
-                "sources": sources[:4] if sources else ["https://owasp.org/www-project-top-10-for-large-language-model-applications/"],
-                "live": True
-            }
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    TAVILY_SEARCH_URL,
+                    json={
+                        "api_key": effective_key,
+                        "query": query,
+                        "search_depth": "advanced",
+                        "max_results": 5,
+                        "include_answer": True
+                    }
+                )
+                elapsed_ms = round((time.perf_counter() - start_time) * 1000, 1)
+                if res.status_code == 200:
+                    response = res.json()
+                    answer = response.get("answer", "")
+                    results = response.get("results", [])
+                    sources = [r.get("url", "") for r in results if r.get("url")]
+                    articles = [
+                        {
+                            "title": r.get("title", "Threat Advisory"),
+                            "url": r.get("url", ""),
+                            "snippet": (r.get("content", "") or "")[:240]
+                        }
+                        for r in results[:5]
+                    ]
+                    combined_snippets = " | ".join(
+                        f"{a['title']}: {a['snippet']}" for a in articles if a.get("snippet")
+                    )
+                    summary_text = answer if answer else (
+                        combined_snippets[:600] if combined_snippets else "Live threat intelligence retrieved from Tavily Search API."
+                    )
+                    return {
+                        "source": "tavily_live_api",
+                        "query": query,
+                        "summary": summary_text,
+                        "sources": sources[:5] if sources else ["https://owasp.org/www-project-top-10-for-large-language-model-applications/"],
+                        "articles": articles,
+                        "latency_ms": elapsed_ms,
+                        "live": True
+                    }
+                else:
+                    print(f"[NeMo-Sentry] Tavily HTTP {res.status_code}: {res.text[:160]}")
         except Exception as e:
             print(f"[NeMo-Sentry] Tavily API call failed ({e}), falling back to curated intelligence.")
 
-    # Curated offline fallback with rich threat intelligence
+    elapsed_ms = round((time.perf_counter() - start_time) * 1000, 1)
     return {
         "source": "curated_threat_intel_kb",
         "query": query,
@@ -88,5 +104,7 @@ async def get_latest_threat_intel(
             "https://arxiv.org/abs/2403.04786 (Crescendo Multi-turn LLM Jailbreaks)",
             "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-LLM-01"
         ],
+        "articles": [],
+        "latency_ms": elapsed_ms,
         "live": False
     }
