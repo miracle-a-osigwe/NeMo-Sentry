@@ -762,11 +762,11 @@ export default function App() {
     if (isCustomMode) {
       const trimmed = customUrl.trim();
       if (!trimmed) {
-        alert("Please enter a custom OpenAI-compatible endpoint URL (e.g. https://api.my-company.com/v1/chat/completions) before launching the audit.");
+        alert("Please enter a custom LLM or Chatbot endpoint URL (e.g. OpenAI, Anthropic, LangChain, or custom REST webhook) before launching the audit.");
         return;
       }
       if (trimmed.includes("my-llm-service.com") || trimmed.includes("example.com")) {
-        alert("The target endpoint appears to be a placeholder ('my-llm-service.com'). Please enter a real, reachable OpenAI-compatible endpoint URL.");
+        alert("The target endpoint appears to be a placeholder ('my-llm-service.com'). Please enter a real, reachable LLM endpoint or custom chatbot webhook URL.");
         return;
       }
       if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
@@ -952,9 +952,9 @@ export default function App() {
 
         if (!isFastForwardChat) {
           setActiveSpeakerThinking('adversary');
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise(r => setTimeout(r, 600));
           setActiveSpeakerThinking('target');
-          await new Promise(r => setTimeout(r, 100));
+          await new Promise(r => setTimeout(r, 600));
           setActiveSpeakerThinking(null);
         }
 
@@ -970,7 +970,7 @@ export default function App() {
           probes: partialProbes
         });
 
-        const stepDelay = isFastForwardChat ? 30 : 200;
+        const stepDelay = isFastForwardChat ? 40 : 600;
         await new Promise(r => setTimeout(r, stepDelay));
       }
       setActiveSpeakerThinking(null);
@@ -1737,7 +1737,7 @@ export default function App() {
             }}>
               <input
                 type="text"
-                placeholder="Target OpenAI-compatible URL (e.g. https://api.my-company.com/v1/chat/completions)"
+                placeholder="Target URL (OpenAI, Anthropic, LangChain, or Custom Webhook e.g. /v1/chat/completions)"
                 value={customUrl}
                 onChange={(e) => setCustomUrl(e.target.value)}
                 className="font-editorial-mono"
@@ -1754,7 +1754,7 @@ export default function App() {
               />
               <input
                 type="password"
-                placeholder="Optional Target Bearer Token (sk-...)"
+                placeholder="Optional Bearer Token or API Key"
                 value={targetApiKey}
                 onChange={(e) => setTargetApiKey(e.target.value)}
                 className="font-editorial-mono"

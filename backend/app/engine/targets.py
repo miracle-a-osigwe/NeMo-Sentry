@@ -123,10 +123,86 @@ class TargetConnectionError(Exception):
     pass
 
 
+def extract_chatbot_response_text(data, raw_text: str = "") -> str:
+    """
+    Universally extracts the assistant's reply text across all common LLM and chatbot formats:
+    - OpenAI / vLLM / LiteLLM / Ollama: choices[0].message.content or choices[0].text
+    - Anthropic Claude Messages API: content[0].text
+    - Google Gemini REST API: candidates[0].content.parts[0].text
+    - Custom Enterprise Chatbots (FastAPI, Flask, Express, LangChain):
+      data.get("response") or data.get("reply") or data.get("message") or data.get("text") or data.get("output") or data.get("answer")
+    - Raw plain text / HTML / Markdown payloads
+    """
+    if isinstance(data, dict):
+        # 1. OpenAI / vLLM / Ollama chat completions
+        if "choices" in data and isinstance(data["choices"], list) and len(data["choices"]) > 0:
+            first_choice = data["choices"][0]
+            if isinstance(first_choice, dict):
+                if "message" in first_choice and isinstance(first_choice["message"], dict):
+                    content = first_choice["message"].get("content")
+                    if content is not None:
+                        return str(content).strip()
+                if "text" in first_choice and first_choice["text"] is not None:
+                    return str(first_choice["text"]).strip()
+
+        # 2. Anthropic Claude messages API
+        if "content" in data and isinstance(data["content"], list) and len(data["content"]) > 0:
+            first_block = data["content"][0]
+            if isinstance(first_block, dict) and "text" in first_block and first_block["text"]:
+                return str(first_block["text"]).strip()
+
+        # 3. Google Gemini REST API
+        if "candidates" in data and isinstance(data["candidates"], list) and len(data["candidates"]) > 0:
+            first_candidate = data["candidates"][0]
+            if isinstance(first_candidate, dict):
+                cand_content = first_candidate.get("content", {})
+                if isinstance(cand_content, dict) and "parts" in cand_content:
+                    parts = cand_content["parts"]
+                    if isinstance(parts, list) and len(parts) > 0 and isinstance(parts[0], dict):
+                        part_text = parts[0].get("text")
+                        if part_text:
+                            return str(part_text).strip()
+
+        # 4. Standard custom enterprise chatbot / LangChain / webhook fields
+        common_keys = [
+            "response",
+            "reply",
+            "output",
+            "text",
+            "answer",
+            "result",
+            "bot_response",
+            "bot_message",
+            "assistant",
+            "generated_text",
+        ]
+        for key in common_keys:
+            val = data.get(key)
+            if val is not None and isinstance(val, str) and val.strip():
+                return val.strip()
+
+        # 5. Check if "message" is a string or dict
+        msg_val = data.get("message")
+        if isinstance(msg_val, str) and msg_val.strip():
+            return msg_val.strip()
+        elif isinstance(msg_val, dict) and "content" in msg_val:
+            return str(msg_val["content"]).strip()
+
+        # 6. Fallback: inspect all values for non-empty string
+        for val in data.values():
+            if isinstance(val, str) and len(val.strip()) > 0:
+                return val.strip()
+
+    if raw_text and raw_text.strip():
+        return raw_text.strip()
+    return str(data)
+
+
 async def verify_custom_endpoint_health(url: str, api_key: str = None) -> None:
     """
     Performs a fast pre-flight validation check against an external custom target endpoint URL.
     Validates DNS resolution, network reachability, and basic endpoint response.
+    Supports OpenAI, Anthropic, Gemini wrappers, and custom webhook formats.
     Raises TargetConnectionError if the endpoint is unreachable or invalid.
     """
     cleaned_url = (url or "").strip()
@@ -138,34 +214,46 @@ async def verify_custom_endpoint_health(url: str, api_key: str = None) -> None:
     dummy_hosts = ["my-llm-service.com", "example.com", "placeholder", "your-api.com"]
     if any(d in cleaned_url.lower() for d in dummy_hosts):
         raise TargetConnectionError(
-            f"Invalid target endpoint '{cleaned_url}'. Please provide a real, reachable OpenAI-compatible LLM endpoint URL."
+            f"Invalid target endpoint '{cleaned_url}'. Please provide a real, reachable LLM endpoint or chatbot webhook URL."
         )
 
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+        headers["x-api-key"] = api_key
 
-    test_payload = {
+    test_payload_openai = {
         "model": "default",
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 10,
     }
 
+    test_payload_universal = {
+        "prompt": "ping",
+        "message": "ping",
+        "query": "ping",
+        "text": "ping",
+    }
+
     try:
         async with httpx.AsyncClient(timeout=8.0) as client:
-            res = await client.post(cleaned_url, json=test_payload, headers=headers)
-            # 200: fully functional.
-            # 400 or 422: endpoint is live and parsed JSON (may need a specific model name).
-            # 401 or 403: auth failure.
-            if res.status_code in (401, 403):
+            res = await client.post(cleaned_url, json=test_payload_openai, headers=headers)
+            # If 400 or 422, test whether the endpoint prefers flat payload (e.g. FastAPI/LangChain/Flask)
+            if res.status_code in (400, 422):
+                res_alt = await client.post(cleaned_url, json=test_payload_universal, headers=headers)
+                if res_alt.status_code in (200, 400, 422):
+                    return  # Endpoint parsed valid JSON
+            elif res.status_code == 200:
+                return  # Healthy
+            elif res.status_code in (401, 403):
                 raise TargetConnectionError(
-                    f"Authentication failed on custom target endpoint '{cleaned_url}' (HTTP {res.status_code}). Please supply a valid Target Bearer Token."
+                    f"Authentication failed on custom target endpoint '{cleaned_url}' (HTTP {res.status_code}). Please supply a valid Target Bearer Token or API key."
                 )
-            if res.status_code == 404:
+            elif res.status_code == 404:
                 raise TargetConnectionError(
-                    f"Custom target endpoint '{cleaned_url}' returned HTTP 404 Not Found. Please verify the URL path (e.g. /v1/chat/completions)."
+                    f"Custom target endpoint '{cleaned_url}' returned HTTP 404 Not Found. Please verify the URL path (e.g. /v1/chat/completions or /api/chat)."
                 )
-            if res.status_code >= 500:
+            elif res.status_code >= 500:
                 raise TargetConnectionError(
                     f"Custom target endpoint '{cleaned_url}' returned HTTP {res.status_code} Server Error: {res.text[:200]}"
                 )
@@ -209,18 +297,19 @@ async def call_target(
             messages=messages,
         )
 
-    # External live HTTP endpoint
+    # External live HTTP endpoint (Universal adapter for OpenAI, Anthropic, Gemini wrappers, LangChain, FastAPI)
     if target_id_or_url.startswith("http://") or target_id_or_url.startswith(
         "https://"
     ):
         headers = {"Content-Type": "application/json"}
         if target_api_key:
             headers["Authorization"] = f"Bearer {target_api_key}"
+            headers["x-api-key"] = target_api_key
 
         payload_messages = messages or [
             {"role": "user", "content": effective_prompt}
         ]
-        payload = {
+        openai_payload = {
             "model": "default",
             "messages": payload_messages,
             "max_tokens": 512,
@@ -228,13 +317,40 @@ async def call_target(
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                res = await client.post(target_id_or_url, json=payload, headers=headers)
+            async with httpx.AsyncClient(timeout=20.0) as client:
+                # Attempt 1: Standard OpenAI chat completions format
+                res = await client.post(target_id_or_url, json=openai_payload, headers=headers)
                 if res.status_code == 200:
-                    data = res.json()
-                    if "choices" in data and len(data["choices"]) > 0:
-                        return data["choices"][0]["message"]["content"]
-                    return str(data)
+                    try:
+                        data = res.json()
+                        extracted = extract_chatbot_response_text(data, res.text)
+                        if extracted:
+                            return extracted
+                    except Exception:
+                        if res.text.strip():
+                            return res.text.strip()
+
+                # Attempt 2: If endpoint rejected OpenAI messages format (HTTP 400 or 422), retry with flat chatbot schema
+                if res.status_code in (400, 422):
+                    universal_payload = {
+                        "prompt": effective_prompt,
+                        "message": effective_prompt,
+                        "query": effective_prompt,
+                        "text": effective_prompt,
+                        "input": effective_prompt,
+                        "messages": payload_messages,
+                    }
+                    res_alt = await client.post(target_id_or_url, json=universal_payload, headers=headers)
+                    if res_alt.status_code == 200:
+                        try:
+                            data_alt = res_alt.json()
+                            extracted_alt = extract_chatbot_response_text(data_alt, res_alt.text)
+                            if extracted_alt:
+                                return extracted_alt
+                        except Exception:
+                            if res_alt.text.strip():
+                                return res_alt.text.strip()
+
                 raise TargetConnectionError(
                     f"Custom target endpoint '{target_id_or_url}' returned HTTP {res.status_code}: {res.text[:200]}"
                 )
