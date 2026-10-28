@@ -126,7 +126,7 @@ cp .env.example .env
 # Edit .env with your NEBIUS_API_KEY and TAVILY_API_KEY if available
 python run.py
 ```
-Backend API will be running at `http://localhost:8000`. Test Swagger docs at `http://localhost:8000/docs`.
+Backend API will be running at `http://localhost:8001`. Test Swagger docs at `http://localhost:8001/docs`.
 
 ### 3. Frontend Setup
 ```bash
@@ -135,6 +135,14 @@ npm install
 npm run dev
 ```
 Open `http://localhost:5173` to access the NeMo-Sentry Mission Control dashboard.
+
+### 4. One-Click Unified Docker & Cloud Deployment (Railway / Render / HF Spaces)
+NeMo-Sentry includes a multi-stage root `Dockerfile` that builds the React frontend (`frontend/dist`) and serves both the UI and FastAPI backend from a single unified origin:
+```bash
+docker build -t nemo-sentry .
+docker run -p 8001:8001 -e NEBIUS_API_KEY="your_nebius_key" -e TAVILY_API_KEY="your_tavily_key" nemo-sentry
+```
+Open `http://localhost:8001` to access the full-stack application.
 
 ---
 
